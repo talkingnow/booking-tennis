@@ -10,6 +10,7 @@ import { submitReservation, cancelReservation } from '@/lib/gytennis/reserve';
 import { isSessionValid } from '@/lib/gytennis/auth';
 import { openKcpPayment } from '@/lib/payment/handoff';
 import { COURTS, courtName } from '@/lib/courts';
+import { SlotGrid } from '@/components/SlotGrid';
 import type { DailyView, Slot, KcpForm } from '@/lib/gytennis/types';
 
 export default function Quick() {
@@ -146,6 +147,16 @@ export default function Quick() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">⚡ 즉시 예약</h1>
+
+      {/* Legend card */}
+      <Card className="py-2">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+          <span><span className="text-accent font-bold mr-1">○</span>예약 가능</span>
+          <span><span className="text-slate-500 font-bold mr-1">×</span>예약됨</span>
+          <span><span className="text-yellow-300 font-bold mr-1">⏳</span>결제중</span>
+          <span><span className="text-slate-700 font-bold mr-1">–</span>불가</span>
+        </div>
+      </Card>
 
       {/* Favorites management panel */}
       <Card>
@@ -288,12 +299,9 @@ export default function Quick() {
         </Card>
       )}
 
-      {/* Slot cards */}
+      {/* Slot grid cards */}
       {courtIds.map((id) => {
         const view = data.get(id);
-        const availableSlots = view?.slots.filter(
-          (s) => s.status === 'available' || pendingSlots.has(s.raw),
-        ) ?? [];
         return (
           <Card key={id}>
             <div className="flex items-center justify-between mb-2">
@@ -304,34 +312,16 @@ export default function Quick() {
             </div>
             {!view ? (
               <p className="text-xs text-slate-500">{loading ? '조회 중…' : '데이터 없음'}</p>
-            ) : availableSlots.length === 0 ? (
-              <p className="text-xs text-slate-500">예약 가능 슬롯 없음</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {availableSlots.map((s) => {
-                  const isPending = pendingSlots.has(s.raw);
-                  const isBusy = busySlot === s.raw;
-                  return (
-                    <button
-                      key={s.raw}
-                      onClick={() => { if (!isPending && !isBusy) setConfirmSlot(s); }}
-                      disabled={isBusy || isPending}
-                      aria-label={`${s.courtNo}번 코트 ${s.hour}시 예약`}
-                      className={`min-h-[44px] px-3 py-2 rounded-lg text-xs disabled:opacity-70 transition-colors ${
-                        isPending
-                          ? 'bg-yellow-200 text-yellow-900 cursor-not-allowed'
-                          : 'bg-slate-700 hover:bg-accent hover:text-bg cursor-pointer'
-                      }`}
-                    >
-                      {isBusy ? '...' : isPending ? (
-                        <>⏳ {s.courtNo}번 {s.hour}시 결제중</>
-                      ) : (
-                        `${s.courtNo}번 ${s.hour}시`
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              <SlotGrid
+                courtId={id}
+                slots={view.slots}
+                pendingSlots={pendingSlots}
+                loading={loading && !view}
+                onSlotClick={(s) => {
+                  if (busySlot !== s.raw) setConfirmSlot(s);
+                }}
+              />
             )}
           </Card>
         );
