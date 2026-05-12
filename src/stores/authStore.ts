@@ -99,6 +99,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               : '로그인에 실패했습니다.',
       });
       return false;
+    }).catch(() => {
+      set({ busy: false, error: '로그인 중 오류가 발생했습니다.' });
+      return false;
     }).finally(() => {
       delete _loginPromises[siteId];
     });

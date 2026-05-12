@@ -25,7 +25,9 @@ export function loadAccount(siteId: SiteId): StoredAccount | null {
 }
 
 export function saveAccount(siteId: SiteId, account: StoredAccount): void {
-  localStorage.setItem(key(siteId), JSON.stringify(account));
+  try {
+    localStorage.setItem(key(siteId), JSON.stringify(account));
+  } catch {}
 }
 
 export function clearAccount(siteId: SiteId): void {

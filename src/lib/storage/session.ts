@@ -29,8 +29,10 @@ export function loadSession(siteId: SiteId): string | null {
 }
 
 export function saveSession(siteId: SiteId, cookie: string): void {
-  const s: StoredSession = { cookie, savedAt: Date.now() };
-  localStorage.setItem(key(siteId), JSON.stringify(s));
+  try {
+    const s: StoredSession = { cookie, savedAt: Date.now() };
+    localStorage.setItem(key(siteId), JSON.stringify(s));
+  } catch {}
 }
 
 export function clearSession(siteId: SiteId): void {

@@ -9,7 +9,7 @@ type SiteState = {
 };
 
 export const useSiteStore = create<SiteState>((set) => ({
-  activeSiteId: 'gy',
+  activeSiteId: loadActiveSite(),
 
   hydrate: () => {
     set({ activeSiteId: loadActiveSite() });
