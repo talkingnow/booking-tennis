@@ -3,6 +3,7 @@ import Home from './routes/Home';
 import Account from './routes/Account';
 import Race from './routes/Race';
 import Quick from './routes/Quick';
+import PaymentResult from './routes/PaymentResult';
 
 export default function App() {
   const loc = useLocation();
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/account" element={<Account />} />
           <Route path="/race" element={<Race />} />
           <Route path="/quick" element={<Quick />} />
+          <Route path="/payment-result" element={<PaymentResult />} />
         </Routes>
       </main>
       <footer className="px-4 py-3 text-center text-xs text-slate-500 border-t border-slate-800">
