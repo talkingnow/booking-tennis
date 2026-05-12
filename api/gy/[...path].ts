@@ -1,4 +1,4 @@
-export const config = { runtime: 'edge' };
+export const config = { runtime: 'edge', regions: ['icn1'] };
 
 const UPSTREAM = 'https://www.gytennis.or.kr';
 const ALLOWED_PATHS = [
