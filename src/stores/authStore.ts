@@ -9,8 +9,19 @@ type AuthState = {
   busy: boolean;
   error: string | null;
   hydrate: () => void;
-  saveCredentials: (id: string, pw: string, remember: boolean) => void;
-  doLogin: () => Promise<boolean>;
+  /**
+   * Persist credentials to localStorage and update store.
+   * Returns the constructed StoredAccount so the caller can pass it directly
+   * to doLogin() without relying on async store propagation.
+   */
+  saveCredentials: (id: string, pw: string, remember: boolean) => StoredAccount;
+  /**
+   * Perform gytennis login.
+   * If `acc` is provided it is used directly (avoids the race condition where
+   * the Zustand state setter hasn't propagated yet).
+   * Falls back to the stored account from state when acc is omitted.
+   */
+  doLogin: (acc?: StoredAccount) => Promise<boolean>;
   doLogout: () => Promise<void>;
   forget: () => void;
 };
@@ -20,22 +31,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   cookie: null,
   busy: false,
   error: null,
+
   hydrate: () => {
     set({ account: loadAccount(), cookie: loadSession() });
   },
+
   saveCredentials: (id, pw, remember) => {
     const acc: StoredAccount = { id, pw, remember, savedAt: Date.now() };
     if (remember) saveAccount(acc);
     set({ account: acc, error: null });
+    return acc;
   },
-  doLogin: async () => {
-    const acc = get().account;
-    if (!acc) {
+
+  doLogin: async (acc?: StoredAccount) => {
+    // Prefer the explicitly-passed account (avoids setTimeout race condition).
+    const target = acc ?? get().account;
+    if (!target) {
       set({ error: '계정 정보가 없습니다.' });
       return false;
     }
     set({ busy: true, error: null });
-    const result = await apiLogin(acc.id, acc.pw);
+    const result = await apiLogin(target.id, target.pw);
     if (result.ok) {
       saveSession(result.cookie);
       set({ cookie: result.cookie, busy: false });
@@ -52,6 +68,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
     return false;
   },
+
   doLogout: async () => {
     const cookie = get().cookie;
     set({ busy: true });
@@ -59,6 +76,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     clearSession();
     set({ cookie: null, busy: false });
   },
+
   forget: () => {
     clearAccount();
     clearSession();

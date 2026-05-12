@@ -1,6 +1,7 @@
 import { gyFetch } from './proxyClient';
 import { extractOrderId, parseKcpForm } from '../parsers/kcpParser';
 import type { ReservationResult, Slot } from './types';
+import { debugLog } from '@/components/DebugPanel';
 
 /**
  * Submit one or more slots to /rsvConfirm.
@@ -23,13 +24,13 @@ export async function submitReservation(
   const body = new URLSearchParams();
   body.set('cvalue', String(first.courtId));
   body.set('cdate', first.date);
-  // isvkrrRaw carries the actual price token (e.g. "2026-05-12|1|1|6|8000").
-  // raw (yxjorg) has price=0 and is rejected by the server.
   for (const s of slots) body.append('isvkrr[]', s.isvkrrRaw || s.raw);
   body.set('van_code', options.vanCode ?? '');
 
+  debugLog('req', `rsvConfirm → courtId=${first.courtId} date=${first.date} isvkrr=${slots.map(s=>s.isvkrrRaw||s.raw).join(',')}`);
   const res = await gyFetch('/rsvConfirm', { method: 'POST', body, cookie });
   const html = await res.text();
+  debugLog('res', `rsvConfirm ← status=${res.status} loc=${res.location||'-'} htmlLen=${html.length}`);
 
   if (res.status === 307 || /login/i.test(res.location ?? '')) {
     return { ok: false, reason: 'not_logged_in' };
@@ -37,13 +38,17 @@ export async function submitReservation(
 
   const orderId = extractOrderId(html);
   const kcp = parseKcpForm(html);
+  debugLog('info', `orderId=${orderId||'none'} kcpAction=${kcp?.action||'none'} kcpFields=${kcp?Object.keys(kcp.fields).join(','):'none'}`);
 
   if (orderId) {
-    return { ok: true, orderId, html, kcp };
+    const verified = await verifyReservation(orderId, cookie);
+    debugLog('info', `rsvVf verified=${verified}`);
+    return { ok: true, orderId, html, kcp, verified };
   }
 
-  // No order id → server rejected. Classify by error keywords found in the page.
-  return { ok: false, reason: classifyError(html) };
+  const reason = classifyError(html);
+  debugLog('err', `rsvConfirm 실패 reason=${reason} htmlSnippet=${html.slice(0,200).replace(/\s+/g,' ')}`);
+  return { ok: false, reason };
 }
 
 /** Verify a reservation right after /rsvConfirm. (gytennis XHR pre-payment) */

@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Booking Tennis',
@@ -45,7 +45,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'https://booking-tennis-talkingnow.vercel.app',
+        target: 'https://booking-tennis.vercel.app',
         changeOrigin: true,
         secure: true,
       },

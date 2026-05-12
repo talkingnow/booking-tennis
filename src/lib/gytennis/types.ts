@@ -1,4 +1,10 @@
-export type SlotStatus = 'available' | 'reserved' | 'blocked';
+/**
+ * 'available'  — pickable, free slot
+ * 'reserved'   — already taken by someone
+ * 'blocked'    — truly unavailable (disabled by the site)
+ * 'pending'    — UI-only: user reserved it but payment is in progress
+ */
+export type SlotStatus = 'available' | 'reserved' | 'blocked' | 'pending';
 
 export type Slot = {
   /** YYYY-MM-DD */
@@ -72,6 +78,8 @@ export type ReservationResult =
       html: string;
       /** Extracted KCP popup parameters, if successfully parsed. */
       kcp: KcpForm | null;
+      /** Whether /rsvVf (pre-payment verify) confirmed the reservation. */
+      verified: boolean;
     }
   | {
       ok: false;

@@ -12,18 +12,23 @@ const statusStyle: Record<Slot['status'], string> = {
   available: 'bg-slate-800 border-slate-600 hover:border-accent cursor-pointer text-slate-200',
   reserved: 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed',
   blocked: 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed',
+  pending: 'bg-yellow-200 border-yellow-400 text-yellow-900 cursor-not-allowed',
 };
 
-// Only two visual states (per user request):
+// Visual states:
 //   ○ = available (pickable)
+//   ⏳ = pending (payment in progress — yellow)
 //   × = anything else (reserved or blocked)
 function glyph(s: Slot): string {
-  return s.status === 'available' ? '○' : '×';
+  if (s.status === 'available') return '○';
+  if (s.status === 'pending') return '⏳';
+  return '×';
 }
 
 function label(s: Slot): string {
   if (s.status === 'available') return '예약 가능';
   if (s.status === 'reserved') return '이미 예약됨';
+  if (s.status === 'pending') return '결제 진행 중';
   return '예약 불가';
 }
 
@@ -91,9 +96,10 @@ export function SlotPicker({ slots, selected, onToggle }: Props) {
           ))}
         </tbody>
       </table>
-      <div className="mt-2 flex gap-3 text-[10px] text-slate-500 px-1">
+      <div className="mt-2 flex gap-3 text-[10px] text-slate-500 px-1 flex-wrap">
         <span><span className="text-slate-200">○</span> 예약 가능</span>
         <span><span className="text-slate-600">×</span> 예약 불가</span>
+        <span><span className="text-yellow-600">⏳</span> 결제 진행 중</span>
       </div>
     </div>
   );

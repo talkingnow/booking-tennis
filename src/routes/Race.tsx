@@ -3,13 +3,17 @@ import { Link } from 'react-router-dom';
 import { Card, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { SlotPicker } from '@/components/SlotPicker';
+import { PaymentCountdown } from '@/components/PaymentCountdown';
 import { useAuthStore } from '@/stores/authStore';
 import { getDaily } from '@/lib/gytennis/slots';
-import { submitReservation } from '@/lib/gytennis/reserve';
+import { submitReservation, cancelReservation } from '@/lib/gytennis/reserve';
+import { isSessionValid } from '@/lib/gytennis/auth';
 import type { DailyView, Slot } from '@/lib/gytennis/types';
 import { COURTS } from '@/lib/courts';
 import { formatRemaining, startCountdown, type CountdownHandle } from '@/lib/scheduler/countdown';
+import { measureServerOffsetMs } from '@/lib/scheduler/timeSync';
 import { openKcpPayment } from '@/lib/payment/handoff';
+import { useUiStore } from '@/stores/uiStore';
 
 type Phase = 'setup' | 'armed' | 'firing' | 'success' | 'failed';
 
@@ -27,16 +31,39 @@ function toLocalInput(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function defaultDate(): string {
-  // For racing, the targeted reservation date is usually next month's matching day
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/**
+ * Compute the next-month date for the same day, clamping to the last day of
+ * the target month to avoid JS date overflow (e.g. Jan 31 → Feb 28, not Mar 3).
+ * Exported for unit testing.
+ */
+export function defaultDate(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-based
+  const nextMonth = m + 1 > 11 ? 0 : m + 1;
+  const nextYear = m + 1 > 11 ? y + 1 : y;
+  // Last day of nextMonth (month+1 day 0 = last day of month)
+  const lastDay = new Date(nextYear, nextMonth + 1, 0).getDate();
+  const day = Math.min(now.getDate(), lastDay);
+  return `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Returns the next 25th-at-22:00 datetime-local string.
+ *  If today is before the 25th (or exactly 25th before 22:00), returns this month's 25th.
+ *  Otherwise returns next month's 25th. */
+function defaultOpenDate(): string {
+  const now = new Date();
+  const candidate = new Date(now.getFullYear(), now.getMonth(), 25, 22, 0, 0, 0);
+  if (candidate.getTime() <= now.getTime()) {
+    // Already past this month's opening — go to next month
+    candidate.setMonth(candidate.getMonth() + 1);
+  }
+  return toLocalInput(candidate);
 }
 
 export default function Race() {
   const { cookie, hydrate, doLogin, account, busy } = useAuthStore();
+  const setArmed = useUiStore((s) => s.setArmed);
   const [courtId, setCourtId] = useState(1);
   const [date, setDate] = useState(defaultDate());
   const [target, setTarget] = useState(defaultTarget());
@@ -47,6 +74,8 @@ export default function Race() {
   const [remaining, setRemaining] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [kcpReady, setKcpReady] = useState<null | ReturnType<typeof submitOk>>(null);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [windowClosed, setWindowClosed] = useState(false);
   const handleRef = useRef<CountdownHandle | null>(null);
 
   useEffect(() => {
@@ -63,44 +92,73 @@ export default function Race() {
   const targetMs = useMemo(() => new Date(target).getTime(), [target]);
 
   const loadSlots = async () => {
-    if (!cookie) return;
+    const currentCookie = useAuthStore.getState().cookie;
+    if (!currentCookie) return;
     setLoadingDaily(true);
     setError(null);
-    const view = await getDaily(courtId, cookie, date);
-    if (!view) {
-      setError('슬롯을 불러오지 못했습니다. 세션이 만료되었을 수 있어 재로그인을 시도합니다.');
-      const ok = await doLogin();
-      if (ok) {
-        const v2 = await getDaily(courtId, useAuthStore.getState().cookie!, date);
-        setDaily(v2);
+
+    // Validate session before fetching — gytennis returns 200 login page for
+    // expired sessions so we can't rely on HTTP status alone.
+    const valid = await isSessionValid(currentCookie);
+    let activeCookie = currentCookie;
+    if (!valid) {
+      if (!account) {
+        setError('세션이 만료되었습니다. 계정 설정에서 다시 로그인해 주세요.');
+        setLoadingDaily(false);
+        return;
       }
+      const ok = await doLogin();
+      if (!ok) {
+        setError('재로그인 실패. 계정 설정에서 비밀번호를 확인해 주세요.');
+        setLoadingDaily(false);
+        return;
+      }
+      activeCookie = useAuthStore.getState().cookie!;
+    }
+
+    const view = await getDaily(courtId, activeCookie, date);
+    if (!view) {
+      setError('슬롯을 불러오지 못했습니다. 해당 날짜/코트장을 확인해 주세요.');
     } else {
       setDaily(view);
     }
     setLoadingDaily(false);
   };
 
-  const arm = () => {
+  const arm = async () => {
     if (!picked.length) return setError('슬롯을 1개 이상 선택하세요.');
     if (targetMs - Date.now() < 1_000) return setError('타겟 시각이 너무 가깝거나 지났습니다.');
     setError(null);
     setPhase('armed');
+    setArmed(true);
+    // Measure server clock offset before arming (3 HEAD samples)
+    const offsetMs = await measureServerOffsetMs(3);
     handleRef.current = startCountdown({
       targetMs,
       leadMs: 50,
+      offsetMs,
       onTick: (ms) => setRemaining(ms),
       onFire: () => fire(),
     });
   };
 
+  /** Skip countdown and fire immediately. */
+  const fireImmediate = async () => {
+    if (!picked.length) return setError('슬롯을 1개 이상 선택하세요.');
+    setError(null);
+    await fire();
+  };
+
   const cancelArm = () => {
     handleRef.current?.cancel();
     handleRef.current = null;
+    setArmed(false);
     setPhase('setup');
     setRemaining(null);
   };
 
   const fire = async () => {
+    setArmed(false);
     setPhase('firing');
     const c = useAuthStore.getState().cookie;
     if (!c) {
@@ -111,6 +169,8 @@ export default function Race() {
     const result = await submitReservation(picked, c);
     if (result.ok && result.kcp) {
       setKcpReady(submitOk(result.orderId, result.kcp));
+      setDeadline(Date.now() + 8 * 60 * 1_000);
+      setWindowClosed(false);
       setPhase('success');
     } else if (result.ok) {
       setError('예약은 성공했지만 결제 폼을 찾지 못했습니다. /myPage 에서 확인하세요.');
@@ -119,6 +179,24 @@ export default function Race() {
       setError(reasonText(result.reason));
       setPhase('failed');
     }
+  };
+
+  /** Called when 8-min countdown expires → auto cancel. */
+  const handleExpire = async () => {
+    if (!kcpReady) return;
+    const c = useAuthStore.getState().cookie;
+    if (c) await cancelReservation(kcpReady.orderId, c);
+    setError('결제 시간(8분)이 만료되어 슬롯이 취소되었습니다.');
+    setPhase('failed');
+  };
+
+  /** Called when user clicks "지금 취소". */
+  const handleManualCancel = async () => {
+    if (!kcpReady) return;
+    const c = useAuthStore.getState().cookie;
+    if (c) await cancelReservation(kcpReady.orderId, c);
+    setError(null);
+    setPhase('setup');
   };
 
   if (!account) {
@@ -201,8 +279,24 @@ export default function Race() {
               onChange={(e) => setTarget(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
             />
+            <div className="flex gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => setTarget(toLocalInput(new Date()))}
+                className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300"
+              >
+                ⚡ 지금으로 설정
+              </button>
+              <button
+                type="button"
+                onClick={() => setTarget(defaultOpenDate())}
+                className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300"
+              >
+                📅 오픈일 25일 22:00
+              </button>
+            </div>
             <p className="text-xs text-slate-500 mt-2">
-              월 25일 22:00 (시민 예약 오픈) 가 기본값. 본인 폰 시계 기준 정각±100ms 발사.
+              본인 폰 시계 기준 정각±100ms 발사.
             </p>
           </Card>
 
@@ -212,9 +306,19 @@ export default function Race() {
             </Card>
           )}
 
-          <Button onClick={arm} disabled={!picked.length || !cookie}>
-            발사 대기
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={arm} disabled={!picked.length || !cookie} className="flex-1">
+              ⏱ 발사 대기
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={fireImmediate}
+              disabled={!picked.length || !cookie}
+              className="flex-1"
+            >
+              ⚡ 즉시 발사
+            </Button>
+          </div>
         </>
       )}
 
@@ -245,7 +349,27 @@ export default function Race() {
           <CardTitle>✅ 예약 성공</CardTitle>
           <p className="text-sm text-slate-300 mb-2">주문번호: {kcpReady.orderId}</p>
           <p className="text-xs text-slate-500 mb-4">8분 이내에 결제를 완료해야 슬롯이 확정됩니다.</p>
-          <Button onClick={() => openKcpPayment(kcpReady.kcp)}>결제창 열기 →</Button>
+          {windowClosed && (
+            <p className="text-xs text-yellow-400 mb-3">
+              결제창이 닫혔습니다. 결제를 완료하셨으면 아래 카운트다운이 만료되기 전에 완료해 주세요.
+            </p>
+          )}
+          <Button
+            onClick={() =>
+              openKcpPayment(kcpReady.kcp, {
+                onWindowClosed: () => setWindowClosed(true),
+              })
+            }
+          >
+            결제창 열기 →
+          </Button>
+          {deadline && (
+            <PaymentCountdown
+              deadline={deadline}
+              onExpire={handleExpire}
+              onCancel={handleManualCancel}
+            />
+          )}
         </Card>
       )}
 
@@ -253,9 +377,21 @@ export default function Race() {
         <Card className="border border-red-700">
           <CardTitle>❌ 실패</CardTitle>
           <p className="text-sm text-red-300 mb-3">{error}</p>
-          <Button variant="secondary" onClick={() => setPhase('setup')}>
-            다시 시도
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setPhase('setup')}>
+              다시 시도
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                setPhase('setup');
+                await loadSlots();
+              }}
+              disabled={!cookie || loadingDaily}
+            >
+              슬롯 재조회
+            </Button>
+          </div>
         </Card>
       )}
 

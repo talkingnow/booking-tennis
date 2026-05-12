@@ -1,5 +1,6 @@
 import { gyFetch, extractGytssn } from './proxyClient';
 import type { LoginResult } from './types';
+import { debugLog } from '@/components/DebugPanel';
 
 /**
  * Submit a login form to gytennis.
@@ -11,15 +12,14 @@ export async function login(userid: string, passwd: string): Promise<LoginResult
   try {
     const res = await gyFetch('/Login', { method: 'POST', body });
     const cookie = extractGytssn(res.setCookies);
+    debugLog('res', `Login → status=${res.status} cookie=${cookie ? cookie.slice(0,20)+'…' : 'none'}`);
+    // gytennis returns 303→/ on success, 200 (login page re-rendered) on failure.
+    // Crucially, the server also returns a guest gytssn cookie on failed logins,
+    // so we must NOT rely on cookie presence alone — check status strictly.
     if (res.status === 303 && cookie) {
       return { ok: true, cookie };
     }
-    // Some deployments respond 200 with a fresh login page on bad creds.
-    if (!cookie) {
-      return { ok: false, reason: 'bad_credentials' };
-    }
-    // Got a cookie but unexpected status — treat as success but flag in detail.
-    return { ok: true, cookie };
+    return { ok: false, reason: 'bad_credentials' };
   } catch (e) {
     return { ok: false, reason: 'network', detail: String(e) };
   }

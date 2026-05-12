@@ -2,9 +2,11 @@
  * High-precision countdown to a target wall-clock instant.
  *
  * Strategy:
- * - Use Date.now() as the authoritative time source (driftless across tabs).
+ * - Use Date.now() + offsetMs as the authoritative time source.
+ * - `offsetMs` compensates for measured server↔client clock skew (from timeSync).
  * - Tick via setTimeout with adaptive interval (250ms when >5s remain, 25ms when ≤1s).
  * - When `remaining <= leadMs`, invoke onFire() and stop.
+ * - Re-syncs automatically when the page becomes visible again (tab/app switch).
  */
 
 export type CountdownHandle = {
@@ -19,6 +21,11 @@ export type CountdownOptions = {
   targetMs: number;
   /** Fire this many ms BEFORE targetMs to absorb network RTT. Default 0. */
   leadMs?: number;
+  /**
+   * Clock offset to apply: effectiveNow = Date.now() + offsetMs.
+   * Obtained from measureServerOffsetMs(). Default 0 (no correction).
+   */
+  offsetMs?: number;
   /** Called every tick with the remaining ms until target. */
   onTick?: (remainingMs: number) => void;
   /** Called once at fire time. */
@@ -26,15 +33,16 @@ export type CountdownOptions = {
 };
 
 export function startCountdown(opts: CountdownOptions): CountdownHandle {
-  const { targetMs, leadMs = 0, onTick, onFire } = opts;
+  const { targetMs, leadMs = 0, offsetMs = 0, onTick, onFire } = opts;
   let cancelled = false;
   let fired = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  const now = () => Date.now() + offsetMs;
+
   const tick = () => {
     if (cancelled || fired) return;
-    const now = Date.now();
-    const remaining = targetMs - now;
+    const remaining = targetMs - now();
     onTick?.(remaining);
     if (remaining <= leadMs) {
       fired = true;
@@ -53,6 +61,17 @@ export function startCountdown(opts: CountdownOptions): CountdownHandle {
     timer = setTimeout(tick, next);
   };
 
+  // Force an immediate re-tick when the page becomes visible again
+  // (user switched tabs or the screen was locked on mobile).
+  const onVisibilityChange = () => {
+    if (!document.hidden && !cancelled && !fired) {
+      if (timer) clearTimeout(timer);
+      tick();
+    }
+  };
+
+  document.addEventListener('visibilitychange', onVisibilityChange);
+
   // Kick off immediately so onTick fires with the initial value.
   timer = setTimeout(tick, 0);
 
@@ -60,6 +79,7 @@ export function startCountdown(opts: CountdownOptions): CountdownHandle {
     cancel: () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     },
     isDone: () => fired || cancelled,
   };

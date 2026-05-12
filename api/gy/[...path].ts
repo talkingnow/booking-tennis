@@ -29,6 +29,9 @@ const STRIP_REQ_HEADERS = new Set([
   'connection',
   'content-length',
   'cookie',
+  // Always strip these — we override below to spoof same-origin to gytennis
+  'referer',
+  'origin',
 ]);
 
 const STRIP_RES_HEADERS = new Set([
@@ -75,9 +78,12 @@ export default async function handler(req: Request): Promise<Response> {
     );
   }
   fwd.set('Accept-Language', 'ko-KR,ko;q=0.9');
-  // Use a same-origin referer for POST endpoints
-  if (req.method === 'POST' && !fwd.has('referer')) {
-    fwd.set('Referer', UPSTREAM + '/');
+  // Always spoof Referer/Origin to gytennis for all POST requests.
+  // gytennis rejects requests with non-gytennis Referer headers ("No direct
+  // script access allowed"). Since we strip referer/origin above, we always
+  // set them here so gytennis sees a same-origin request.
+  if (req.method === 'POST') {
+    fwd.set('Referer', UPSTREAM + '/daily');
     fwd.set('Origin', UPSTREAM);
   }
 

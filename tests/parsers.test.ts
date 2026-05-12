@@ -18,7 +18,7 @@ describe('slotParser', () => {
 
   it('classifies slots: isvkrr=available, ctooltip-trigger=reserved, disabled=blocked', () => {
     const slots = parseSlots(html);
-    const buckets = { available: 0, reserved: 0, blocked: 0 };
+    const buckets = { available: 0, reserved: 0, blocked: 0, pending: 0 };
     slots.forEach((s) => buckets[s.status]++);
     // Live gytennis verified (2026-05-12 fixture daily/1):
     //   7 cells have <input name="isvkrr[]"> alone → available

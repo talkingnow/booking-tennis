@@ -38,3 +38,4 @@
 | 2026-05-12 | 슬롯 분류 2차 반전 (isvkrr=avail/ctooltip=reserved) | 사용자 라이브 대조 결과 분류 가설 반전, UI ○/× 이진 |
 | 2026-05-12 | Agent Teams 하네스 도입 | `.claude/agents/{planner,builder,qa}.md` + `.claude/skills/booking-tennis-pwa-builder/SKILL.md` — 향후 모든 변경은 Plan→Build→Verify 3단계 팀워크 |
 | 2026-05-12 | 예약 버그 2종 수정 | (1) isvkrr[] 전송 값 수정 — yxjorg(가격=0) → isvkrrRaw(실제가격) / (2) Quick.tsx auto-login effect 추가 |
+| 2026-05-12 | 검수 후 M-A~M-G 수정 (defaultDate 버그, PaymentCountdown, pending 슬롯, SW prompt, timeSync, authStore 강건화) | 02_plan_inspection.md |

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useAuthStore } from '@/stores/authStore';
 import { useFavoritesStore } from '@/stores/favoritesStore';
 import { getDailyBatch } from '@/lib/gytennis/slots';
 import { submitReservation } from '@/lib/gytennis/reserve';
+import { isSessionValid } from '@/lib/gytennis/auth';
 import { openKcpPayment } from '@/lib/payment/handoff';
 import { COURTS, courtName } from '@/lib/courts';
 import type { DailyView, Slot } from '@/lib/gytennis/types';
@@ -18,6 +20,10 @@ export default function Quick() {
   const [loading, setLoading] = useState(false);
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Slots marked pending (payment in progress) — local UI state only */
+  const [pendingSlots, setPendingSlots] = useState<Set<string>>(new Set());
+  /** Dialog state */
+  const [confirmSlot, setConfirmSlot] = useState<Slot | null>(null);
 
   useEffect(() => {
     hydrate();
@@ -36,23 +42,28 @@ export default function Quick() {
     : COURTS.map((c) => c.id);
 
   const refresh = async () => {
-    if (!cookie) return;
+    const currentCookie = useAuthStore.getState().cookie;
+    if (!currentCookie) return;
     setLoading(true);
     setError(null);
-    const map = await getDailyBatch(courtIds, cookie, date);
-    // Check for session expiry — all entries null usually means expired
-    const allNull = Array.from(map.values()).every((v) => v == null);
-    if (allNull && account) {
+
+    // Proactively validate session before fetching.
+    // gytennis returns 200 HTML even for expired sessions (public page),
+    // but with isvkrr price=0 — leading to silent rsvConfirm failures.
+    const valid = await isSessionValid(currentCookie);
+    let activeCookie = currentCookie;
+    if (!valid && account) {
       const ok = await doLogin();
-      if (ok) {
-        const m2 = await getDailyBatch(courtIds, useAuthStore.getState().cookie!, date);
-        setData(m2);
-      } else {
+      if (!ok) {
         setError('세션 만료. 계정 설정에서 다시 로그인해 주세요.');
+        setLoading(false);
+        return;
       }
-    } else {
-      setData(map);
+      activeCookie = useAuthStore.getState().cookie!;
     }
+
+    const map = await getDailyBatch(courtIds, activeCookie, date);
+    setData(map);
     setLoading(false);
   };
 
@@ -61,16 +72,49 @@ export default function Quick() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cookie, date, fav.list.length]);
 
+  /** Called after user confirms via ConfirmDialog */
   const reserve = async (s: Slot) => {
-    if (!cookie) return;
+    let activeCookie = useAuthStore.getState().cookie;
+    if (!activeCookie) return;
     setBusySlot(s.raw);
     setError(null);
-    const result = await submitReservation([s], cookie);
+
+    let result = await submitReservation([s], activeCookie);
+
+    // Last-resort: session expired mid-session → re-login, re-fetch, retry once
+    if (!result.ok && result.reason === 'not_logged_in' && account) {
+      const ok = await doLogin();
+      if (ok) {
+        activeCookie = useAuthStore.getState().cookie!;
+        // Re-fetch daily to get correct isvkrr price values
+        const map = await getDailyBatch(courtIds, activeCookie, date);
+        setData(map);
+        // Find updated slot (same courtId + hour + courtNo)
+        const allSlots = Array.from(map.values()).flatMap((v) => v?.slots ?? []);
+        const fresh = allSlots.find(
+          (t) => t.courtId === s.courtId && t.courtNo === s.courtNo && t.hour === s.hour,
+        );
+        if (fresh && fresh.status === 'available') {
+          result = await submitReservation([fresh], activeCookie);
+        }
+      }
+    }
+
     setBusySlot(null);
+
     if (result.ok && result.kcp) {
       openKcpPayment(result.kcp);
     } else if (!result.ok) {
-      setError(`예약 실패: ${result.reason}`);
+      // If the server says "결제 진행 중" (payment already in progress), mark as pending
+      const isPending =
+        result.reason === 'already_taken' ||
+        (result.reason === 'unknown' && result.detail === '결제 진행 중');
+      if (isPending) {
+        setPendingSlots((prev) => new Set([...prev, s.raw]));
+        setError(`슬롯이 결제 진행 중 상태입니다.`);
+      } else {
+        setError(`예약 실패: ${result.reason}`);
+      }
     } else {
       setError('예약 응답에서 결제 폼을 찾지 못했습니다.');
     }
@@ -103,7 +147,12 @@ export default function Quick() {
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
             />
           </div>
-          <Button variant="secondary" className="w-auto px-4" onClick={refresh} disabled={loading || !cookie || busy}>
+          <Button
+            variant="secondary"
+            className="w-auto px-4"
+            onClick={refresh}
+            disabled={loading || !cookie || busy}
+          >
             {loading || busy ? '…' : '↻'}
           </Button>
         </div>
@@ -127,34 +176,69 @@ export default function Quick() {
               <h3 className="font-semibold">{courtName(id)}</h3>
               <button
                 onClick={() => fav.toggle({ courtId: id })}
-                className="text-xs text-slate-400 hover:text-yellow-400"
+                className="text-xs text-slate-400 hover:text-yellow-400 min-h-[44px] px-2"
+                aria-label={isFav ? '즐겨찾기 해제' : '즐겨찾기 추가'}
               >
                 {isFav ? '★ 즐겨찾기' : '☆ 즐겨찾기'}
               </button>
             </div>
             {!view ? (
               <p className="text-xs text-slate-500">조회 중…</p>
-            ) : view.slots.filter((s) => s.status === 'available').length === 0 ? (
+            ) : view.slots.filter((s) => s.status === 'available').length === 0 &&
+              pendingSlots.size === 0 ? (
               <p className="text-xs text-slate-500">예약 가능 슬롯 없음</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {view.slots
-                  .filter((s) => s.status === 'available')
-                  .map((s) => (
-                    <button
-                      key={s.raw}
-                      onClick={() => reserve(s)}
-                      disabled={busySlot === s.raw}
-                      className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-accent hover:text-bg text-xs disabled:opacity-50"
-                    >
-                      {busySlot === s.raw ? '...' : `${s.courtNo}번 ${s.hour}시`}
-                    </button>
-                  ))}
+                  .filter((s) => s.status === 'available' || pendingSlots.has(s.raw))
+                  .map((s) => {
+                    const isPending = pendingSlots.has(s.raw);
+                    const isbusy = busySlot === s.raw;
+                    return (
+                      <button
+                        key={s.raw}
+                        onClick={() => {
+                          if (!isPending && !isbusy) setConfirmSlot(s);
+                        }}
+                        disabled={isbusy || isPending}
+                        aria-label={`${s.courtNo}번 코트 ${s.hour}시 예약`}
+                        className={`min-h-[44px] px-3 py-2 rounded-lg text-xs disabled:opacity-70 transition-colors ${
+                          isPending
+                            ? 'bg-yellow-200 text-yellow-900 cursor-not-allowed'
+                            : 'bg-slate-700 hover:bg-accent hover:text-bg cursor-pointer'
+                        }`}
+                      >
+                        {isbusy ? (
+                          '...'
+                        ) : isPending ? (
+                          <>⏳ {s.courtNo}번 {s.hour}시 결제중</>
+                        ) : (
+                          `${s.courtNo}번 ${s.hour}시`
+                        )}
+                      </button>
+                    );
+                  })}
               </div>
             )}
           </Card>
         );
       })}
+
+      {/* Confirm dialog — shown when user taps a slot */}
+      <ConfirmDialog
+        open={confirmSlot !== null}
+        message={
+          confirmSlot
+            ? `${courtName(confirmSlot.courtId)} ${confirmSlot.courtNo}번 코트 ${confirmSlot.hour}시 슬롯을 예약하시겠습니까?`
+            : ''
+        }
+        onConfirm={() => {
+          const s = confirmSlot;
+          setConfirmSlot(null);
+          if (s) reserve(s);
+        }}
+        onCancel={() => setConfirmSlot(null)}
+      />
     </div>
   );
 }

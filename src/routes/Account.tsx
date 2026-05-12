@@ -21,9 +21,11 @@ export default function Account() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    saveCredentials(id, pw, remember);
-    // Wait a tick so the store has the new account, then login
-    setTimeout(() => doLogin(), 0);
+    // saveCredentials returns the new account synchronously; pass it directly
+    // to doLogin() to avoid the race condition where Zustand state setter
+    // hasn't propagated yet when doLogin reads get().account.
+    const acc = saveCredentials(id, pw, remember);
+    await doLogin(acc);
   };
 
   return (

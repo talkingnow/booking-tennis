@@ -46,22 +46,33 @@ TeamCreate(
 )
 ```
 
-팀원 3명 병렬 스폰:
+팀원 3명 **순차** 스폰 (한 명 생성 확인 후 다음 생성):
 
+**Step 1** — planner 생성 후 응답 확인:
 ```
 Agent(team_name="BT-Build-team", name="planner",
       subagent_type="planner", model="opus",
       prompt="<Phase 1 입력 — 사용자 원문 + 변경 범위 후보 + 기존 _workspace 참조>")
+```
+→ planner Agent 호출이 완료(에이전트 생성 확인)되면 다음 단계로.
 
+**Step 2** — builder 생성 후 응답 확인:
+```
 Agent(team_name="BT-Build-team", name="builder",
       subagent_type="builder", model="sonnet",
       prompt="대기. Phase 2 시작되면 TaskList 폴링.")
+```
+→ builder Agent 호출이 완료(에이전트 생성 확인)되면 다음 단계로.
 
+**Step 3** — qa 생성:
+```
 Agent(team_name="BT-Build-team", name="qa",
       subagent_type="qa", model="opus",
       prompt="대기. Phase 3 시작되면 TaskList 폴링.")
 ```
 
+> **순차 생성 이유:** 에이전트를 동시에 스폰하면 팀 등록 경합으로 생성 실패가 발생할 수 있음. 반드시 앞 Agent 호출의 반환(또는 에러)을 확인한 뒤 다음 호출을 발행할 것.
+>
 > `subagent_type` 은 `.claude/agents/{planner,builder,qa}.md` 정의를 그대로 사용 (model·도구 메타 자동 적용).
 
 ## Phase 1: 계획 (Plan)
