@@ -5,12 +5,25 @@ export type KcpHandoffOptions = {
   /**
    * Called when the popup window is detected as closed (polled every 1 s).
    * Per R-E B안: does NOT automatically cancel the reservation.
+   * NOTE: Only called on PC mode (popup flow). Mobile redirect flow does not call this.
    */
   onWindowClosed?: () => void;
 };
 
 const GYTENNIS = 'https://www.gytennis.or.kr';
 const KCP_SDK_URL = 'https://pay.kcp.co.kr/plugin/payplus_web.jsp';
+
+/**
+ * Detect mobile device.
+ * - Matches common mobile UA strings.
+ * - iPadOS 13+ reports as "Mac" but has maxTouchPoints > 1.
+ */
+export function isMobile(ua: string = navigator.userAgent): boolean {
+  if (/android|iphone|ipad|ipod|iemobile|opera mini/i.test(ua)) return true;
+  // iPadOS 13+ UA spoof
+  if ((navigator.maxTouchPoints ?? 0) > 1 && /Mac/i.test(ua)) return true;
+  return false;
+}
 
 function escAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -41,6 +54,59 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
     .map(([n, v]) => `<input type="hidden" name="${escAttr(n)}" value="${escAttr(v)}" />`)
     .join('\n');
 
+  if (isMobile()) {
+    // ── Mobile: redirect flow ──────────────────────────────────────────────
+    // KCP mobile payments use redirect (not popup). We build a blob page that
+    // adds m_redirect_url and calls document.order_info.submit() directly.
+    // No KCP SDK script, no popup — just a form POST that KCP redirects back.
+    const orderId = kcp.fields.ordr_idxx ?? '';
+    const redirectUrl = `${location.origin}/payment-result?order_id=${encodeURIComponent(orderId)}`;
+
+    const mobilePageHtml = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=yes,maximum-scale=5.0">
+<title>결제 진행 중...</title>
+<style>
+  html,body{margin:0;padding:0;}
+  body{padding:16px;background:#0f172a;color:#f1f5f9;font-family:sans-serif;
+       min-height:100dvh;box-sizing:border-box;}
+  .center{display:flex;flex-direction:column;align-items:center;justify-content:center;
+          min-height:100dvh;gap:16px;}
+  .msg{font-size:15px;}
+</style>
+</head>
+<body>
+<form name="order_info" method="post" action="${escAttr(action)}" accept-charset="UTF-8">
+${fieldsHtml}
+<input type="hidden" name="m_redirect_url" value="${escAttr(redirectUrl)}" />
+</form>
+<div class="center">
+<p class="msg">결제창으로 이동 중입니다...</p>
+</div>
+<script>
+window.addEventListener('load', function () {
+  document.order_info.submit();
+});
+</script>
+</body>
+</html>`;
+
+    const blob = new Blob([mobilePageHtml], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    debugLog('info', `KCP mobile blob 생성 action=${action} redirect=${redirectUrl}`);
+    const win = window.open(blobUrl, '_blank');
+    debugLog(win ? 'info' : 'err', `모바일 페이지 open=${!!win}`);
+
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
+
+    // Mobile redirect flow: onWindowClosed is NOT called (user navigates away)
+    return win;
+  }
+
+  // ── PC: popup flow (KCP_Pay_Execute) ──────────────────────────────────────
   // Self-contained HTML blob that:
   // 1. loads the KCP SDK from pay.kcp.co.kr
   // 2. calls KCP_Pay_Execute(form) on load — opens the KCP payment popup
@@ -96,7 +162,7 @@ window.addEventListener('load', function () {
   // Revoke blob URL after the page has had time to load
   setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
 
-  // Poll for popup closure
+  // Poll for popup closure (PC only)
   if (popup && onWindowClosed) {
     let notified = false;
     const timer = setInterval(() => {
