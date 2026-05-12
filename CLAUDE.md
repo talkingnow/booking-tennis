@@ -39,3 +39,5 @@
 | 2026-05-12 | Agent Teams 하네스 도입 | `.claude/agents/{planner,builder,qa}.md` + `.claude/skills/booking-tennis-pwa-builder/SKILL.md` — 향후 모든 변경은 Plan→Build→Verify 3단계 팀워크 |
 | 2026-05-12 | 예약 버그 2종 수정 | (1) isvkrr[] 전송 값 수정 — yxjorg(가격=0) → isvkrrRaw(실제가격) / (2) Quick.tsx auto-login effect 추가 |
 | 2026-05-12 | 검수 후 M-A~M-G 수정 (defaultDate 버그, PaymentCountdown, pending 슬롯, SW prompt, timeSync, authStore 강건화) | 02_plan_inspection.md |
+| 2026-05-12 | 즉시 예약 즐겨찾기 관리 패널 + blank screen 버그(useEffect 무한루프) 수정 | Quick.tsx hydrate deps [] 고정 |
+| 2026-05-12 | M1~M4: 결제팝업 스크롤, 팝업닫힘 자동취소(payConfirmedRef), Race normal모드 제거, SlotGrid 시각화 | 02_plan_improve4.md |
