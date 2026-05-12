@@ -43,3 +43,5 @@
 | 2026-05-12 | M1~M4: 결제팝업 스크롤, 팝업닫힘 자동취소(payConfirmedRef), Race normal모드 제거, SlotGrid 시각화 | 02_plan_improve4.md |
 | 2026-05-12 | fix(auth): doLogin() 중복 호출 가드 (busy 체크) — 로그인 튕김 방지 | authStore.ts |
 | 2026-05-12 | KCP 결제창 모바일 리다이렉트(방안 A) — isMobile() 분기, m_redirect_url, /payment-result 콜백 라우트 신규 | 02_plan_kcp_mobile.md |
+| 2026-05-12 | 4종 개선: doLogin promise 공유(중복방지), 결제중 슬롯 반영(payment_in_progress), PWA 상단 safe-area-inset-top, Quick 자동조회 제거 | |
+| 2026-05-12 | 파주시테니스협회 멀티사이트 확장 (M0~M8) — SiteAdapter 추상화, /api/pj 프록시, 파주 12코트 55면, SiteSelector UI, storage 격리, Race 금요일 07:00 prefill | 02_plan_paju.md / 01_recon_paju.md / 06_qa_report_paju.md |
