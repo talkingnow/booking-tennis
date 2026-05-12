@@ -44,6 +44,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   doLogin: async (acc?: StoredAccount) => {
+    // Prevent concurrent login calls (e.g. Quick + Race both trigger auto-login).
+    if (get().busy) return false;
     // Prefer the explicitly-passed account (avoids setTimeout race condition).
     const target = acc ?? get().account;
     if (!target) {
