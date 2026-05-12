@@ -5,20 +5,19 @@ import { debugLog } from '@/components/DebugPanel';
 /**
  * Submit a login form to pjtennis.
  *
- * pjtennis uses 'username' and 'password' (not 'userid'/'passwd' like gytennis).
- * TODO(M0/R4): Confirm input names from raw form HTML. Fallback: 'userid'/'passwd'.
+ * R4 확정 (M0 curl 2026-05-12): form input name="userid" / name="passwd"
+ * — 고양시(gytennis)와 동일. 초기 계획서의 username/password 가정은 틀렸음.
  *
  * - Success: status 303 + Set-Cookie: <session>=...
  * - Failure: status 200 (login page re-rendered)
  */
-export async function login(username: string, password: string): Promise<LoginResult> {
-  // TODO(M0/R4): If live test shows 'userid'/'passwd', change these keys.
-  const body = new URLSearchParams({ username, password });
+export async function login(userid: string, passwd: string): Promise<LoginResult> {
+  const body = new URLSearchParams({ userid, passwd });
   try {
     const res = await pjFetch('/Login', { method: 'POST', body });
     const cookie = extractPjSession(res.setCookies);
     debugLog('res', `pjLogin → status=${res.status} cookie=${cookie ? cookie.slice(0, 20) + '…' : 'none'}`);
-    // pjtennis likely behaves like gytennis: 303→/ on success, 200 on failure.
+    // pjtennis: 303→/ on success, 200 (login page re-rendered) on failure.
     if (res.status === 303 && cookie) {
       return { ok: true, cookie };
     }

@@ -6,12 +6,10 @@ import { debugLog } from '@/components/DebugPanel';
 /**
  * Submit one or more slots to pjtennis /rsvConfirm.
  *
- * TODO(M0/R1): Assumes same POST body format as gytennis:
- *   cvalue, cdate, isvkrr[], van_code
- * If M0 confirms different fields, update the body construction.
+ * R1 확정 (M0 curl 2026-05-12): rsvConfirm, van_code 모두 존재 확인.
+ *   POST body: cvalue, cdate, isvkrr[], van_code — gytennis와 동일.
  *
- * TODO(M0/R3): Assumes KCP payment PG (same as gytennis). If pjtennis uses a
- * different PG, the KcpForm parse / handoff logic needs to branch.
+ * TODO(R3): 결제 PG — KCP 동일 가정. 라이브 예약 1회 테스트로 확정 필요.
  */
 export async function submitReservation(
   slots: Slot[],

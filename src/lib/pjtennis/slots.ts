@@ -6,9 +6,9 @@ import type { DailyView } from './types';
 /**
  * GET /daily/{courtId}[/{date}] from pjtennis and parse the slot grid + metadata.
  *
- * TODO(M0/R1): pjtennis HTML structure is assumed identical to gytennis
- * (same vendor codebase). If M0 curl shows different class names / attributes,
- * add a pjSlotParser and switch here.
+ * R1 확정 (M0 curl 2026-05-12): /daily/1 에서 wholeTable, ensdat, data-sot,
+ * data-soc, data-grp, rsvConfirm, van_code 키워드 모두 확인 → 동일 구조.
+ * isvkrr/yxjorg/ctooltip 은 로그인 후 슬롯 선택 시 DOM 주입 — 파서 재사용 가능.
  *
  * Returns null when the response is not a valid daily page (e.g. expired session).
  */
@@ -21,7 +21,7 @@ export async function getDaily(
   const res = await pjFetch(path, { cookie });
   if (res.status !== 200) return null;
   const html = await res.text();
-  // TODO(M0/R1): If pjtennis uses different structural marker, update this check.
+  // R1 확정: gytennis와 동일한 wholeTable 마커 사용 확인됨.
   if (!/wholeTable/.test(html)) return null;
   const meta = parseCourtMeta(html, courtId);
   const slots = parseSlots(html);
