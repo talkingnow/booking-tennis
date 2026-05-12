@@ -48,12 +48,14 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=yes">
 <title>결제 진행 중...</title>
 <style>
-  body{margin:0;background:#0f172a;color:#f1f5f9;font-family:sans-serif;
-       display:flex;flex-direction:column;align-items:center;justify-content:center;
-       min-height:100vh;gap:16px;}
+  html{overflow-x:auto;}
+  body{margin:0;padding:16px;background:#0f172a;color:#f1f5f9;font-family:sans-serif;
+       min-height:100vh;overflow-x:auto;box-sizing:border-box;}
+  .center{display:flex;flex-direction:column;align-items:center;justify-content:center;
+          min-height:100vh;gap:16px;}
   .msg{font-size:15px;}
   .err{color:#f87171;font-size:13px;margin-top:8px;}
 </style>
@@ -62,8 +64,10 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
 <form name="order_info" method="post" action="${escAttr(action)}" accept-charset="UTF-8">
 ${fieldsHtml}
 </form>
+<div class="center">
 <p class="msg">결제창을 불러오는 중입니다...</p>
 <p class="err" id="err" style="display:none"></p>
+</div>
 <script src="${KCP_SDK_URL}"></script>
 <script>
 window.addEventListener('load', function () {
