@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Card, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
-import { cancelReservation } from '@/lib/gytennis/reserve';
 import { useAuthStore } from '@/stores/authStore';
+import { isRegistered, getSite } from '@/lib/sites/registry';
+import { useSiteStore } from '@/stores/siteStore';
+import type { SiteId } from '@/lib/sites/types';
 
 type ResultState = 'pending' | 'success' | 'failure' | 'cancelled' | 'invalid';
 
@@ -12,10 +14,23 @@ export default function PaymentResult() {
   const resCd = params.get('res_cd') ?? '';
   const resMsg = params.get('res_msg') ?? '';
   const orderId = params.get('order_id') ?? '';
+  // site query param — set by handoff.ts in mobile redirect URL
+  const siteParam = params.get('site') ?? '';
 
   const [state, setState] = useState<ResultState>('pending');
   const [cancelError, setCancelError] = useState<string | null>(null);
   const ranRef = useRef(false);
+
+  const { activeSiteId } = useSiteStore();
+
+  // Determine which site adapter to use for cancellation
+  const resolvedSiteId: SiteId =
+    siteParam === 'gy' || siteParam === 'pj'
+      ? siteParam
+      : activeSiteId;
+
+  // Determine site display name
+  const siteName = resolvedSiteId === 'pj' ? '파주시' : '고양시';
 
   useEffect(() => {
     if (ranRef.current) return;
@@ -33,10 +48,11 @@ export default function PaymentResult() {
 
     // Payment failed — cancel the reserved slot
     useAuthStore.getState().hydrate();
-    const cookie = useAuthStore.getState().cookie;
+    const cookie = useAuthStore.getState().cookies[resolvedSiteId];
 
-    if (cookie) {
-      cancelReservation(orderId, cookie)
+    if (cookie && isRegistered(resolvedSiteId)) {
+      const adapter = getSite(resolvedSiteId);
+      adapter.cancelReservation(orderId, cookie)
         .then((ok) => {
           if (!ok) setCancelError('예약 취소 요청에 실패했습니다. 직접 취소해 주세요.');
         })
@@ -77,7 +93,8 @@ export default function PaymentResult() {
         {orderId && (
           <p className="text-xs text-slate-400 mb-1">주문번호: {orderId}</p>
         )}
-        <p className="text-sm text-green-300 mb-4">예약이 성공적으로 완료되었습니다.</p>
+        <p className="text-sm text-green-300 mb-1">{siteName} 예약이 성공적으로 완료되었습니다.</p>
+        <p className="text-xs text-slate-400 mb-4">예약 확인은 {siteName} 사이트에서 확인해 주세요.</p>
         <Link to="/">
           <Button>홈으로</Button>
         </Link>

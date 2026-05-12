@@ -12,10 +12,13 @@
  */
 import type { Slot, SlotStatus } from '@/lib/gytennis/types';
 import { getCourt } from '@/lib/courts';
+import type { SiteId } from '@/lib/sites/types';
 
 export type SlotGridProps = {
   courtId: number;
   slots: Slot[];
+  /** Site identifier — determines which court registry to use. */
+  siteId?: SiteId;
   /** Slot raw keys that are in "payment pending" state. */
   pendingSlots?: Set<string>;
   /** Called when an available slot cell is clicked. */
@@ -51,9 +54,9 @@ function cellLabel(status: SlotStatus): string {
   }
 }
 
-export function SlotGrid({ courtId, slots, pendingSlots = new Set(), onSlotClick, loading }: SlotGridProps) {
+export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set(), onSlotClick, loading }: SlotGridProps) {
   // Determine column court numbers
-  const metaCourtNos = getCourt(courtId)?.courtNos;
+  const metaCourtNos = getCourt(siteId, courtId)?.courtNos;
   const courtNos = metaCourtNos?.length
     ? metaCourtNos
     : Array.from(new Set(slots.map((s) => s.courtNo))).sort((a, b) => a - b);

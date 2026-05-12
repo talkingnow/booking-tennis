@@ -1,11 +1,18 @@
 import { Link } from 'react-router-dom';
+import { useSiteStore } from '@/stores/siteStore';
+import { isRegistered, getSite } from '@/lib/sites/registry';
 
 export default function Home() {
+  const { activeSiteId } = useSiteStore();
+  const siteName = isRegistered(activeSiteId)
+    ? getSite(activeSiteId).config.name
+    : activeSiteId === 'pj' ? '파주시' : '고양시';
+
   return (
     <div className="space-y-4">
       <section className="rounded-2xl bg-panel p-5">
         <h2 className="text-base font-semibold mb-1">계정</h2>
-        <p className="text-sm text-slate-400 mb-3">gytennis 로그인 정보 관리</p>
+        <p className="text-sm text-slate-400 mb-3">{siteName} 로그인 정보 관리</p>
         <Link
           to="/account"
           className="inline-block w-full text-center px-4 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-medium"

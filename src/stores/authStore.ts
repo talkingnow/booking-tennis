@@ -1,87 +1,136 @@
 import { create } from 'zustand';
-import { login as apiLogin, logout as apiLogout } from '@/lib/gytennis/auth';
-import { clearAccount, loadAccount, saveAccount, type StoredAccount } from '@/lib/storage/account';
-import { clearSession, loadSession, saveSession } from '@/lib/storage/session';
+import { clearAccount, loadAccount, saveAccount, migrateLegacyAccount, type StoredAccount } from '@/lib/storage/account';
+import { clearSession, loadSession, saveSession, migrateLegacySession } from '@/lib/storage/session';
+import type { SiteId } from '@/lib/sites/types';
+import { getSite } from '@/lib/sites/registry';
 
 type AuthState = {
-  account: StoredAccount | null;
-  cookie: string | null;
+  accounts: Partial<Record<SiteId, StoredAccount>>;
+  cookies: Partial<Record<SiteId, string>>;
   busy: boolean;
   error: string | null;
   hydrate: () => void;
   /**
-   * Persist credentials to localStorage and update store.
+   * Persist credentials to localStorage for the given site and update store.
    * Returns the constructed StoredAccount so the caller can pass it directly
    * to doLogin() without relying on async store propagation.
    */
-  saveCredentials: (id: string, pw: string, remember: boolean) => StoredAccount;
+  saveCredentials: (siteId: SiteId, id: string, pw: string, remember: boolean) => StoredAccount;
   /**
-   * Perform gytennis login.
+   * Perform login for the given site.
    * If `acc` is provided it is used directly (avoids the race condition where
    * the Zustand state setter hasn't propagated yet).
    * Falls back to the stored account from state when acc is omitted.
+   * Concurrent callers for the same site share the same in-flight promise.
    */
-  doLogin: (acc?: StoredAccount) => Promise<boolean>;
-  doLogout: () => Promise<void>;
-  forget: () => void;
+  doLogin: (siteId: SiteId, acc?: StoredAccount) => Promise<boolean>;
+  doLogout: (siteId: SiteId) => Promise<void>;
+  forget: (siteId: SiteId) => void;
 };
 
+// In-flight login promises per site: concurrent callers share the same request.
+const _loginPromises: Partial<Record<SiteId, Promise<boolean>>> = {};
+
 export const useAuthStore = create<AuthState>((set, get) => ({
-  account: null,
-  cookie: null,
+  accounts: {},
+  cookies: {},
   busy: false,
   error: null,
 
   hydrate: () => {
-    set({ account: loadAccount(), cookie: loadSession() });
+    // One-time legacy key migration (bt:account → bt:account:gy, etc.)
+    migrateLegacyAccount();
+    migrateLegacySession();
+
+    const accounts: Partial<Record<SiteId, StoredAccount>> = {};
+    const cookies: Partial<Record<SiteId, string>> = {};
+
+    for (const siteId of ['gy', 'pj'] as SiteId[]) {
+      const account = loadAccount(siteId);
+      if (account) accounts[siteId] = account;
+      const cookie = loadSession(siteId);
+      if (cookie) cookies[siteId] = cookie;
+    }
+
+    set({ accounts, cookies });
   },
 
-  saveCredentials: (id, pw, remember) => {
+  saveCredentials: (siteId, id, pw, remember) => {
     const acc: StoredAccount = { id, pw, remember, savedAt: Date.now() };
-    if (remember) saveAccount(acc);
-    set({ account: acc, error: null });
+    if (remember) saveAccount(siteId, acc);
+    set((state) => ({
+      accounts: { ...state.accounts, [siteId]: acc },
+      error: null,
+    }));
     return acc;
   },
 
-  doLogin: async (acc?: StoredAccount) => {
-    // Prevent concurrent login calls (e.g. Quick + Race both trigger auto-login).
-    if (get().busy) return false;
-    // Prefer the explicitly-passed account (avoids setTimeout race condition).
-    const target = acc ?? get().account;
+  doLogin: (siteId: SiteId, acc?: StoredAccount) => {
+    // Deduplicate: if a login for this site is already in progress, share it.
+    if (_loginPromises[siteId]) return _loginPromises[siteId]!;
+
+    const target = acc ?? get().accounts[siteId];
     if (!target) {
       set({ error: '계정 정보가 없습니다.' });
-      return false;
+      return Promise.resolve(false);
     }
+
     set({ busy: true, error: null });
-    const result = await apiLogin(target.id, target.pw);
-    if (result.ok) {
-      saveSession(result.cookie);
-      set({ cookie: result.cookie, busy: false });
-      return true;
-    }
-    set({
-      busy: false,
-      error:
-        result.reason === 'bad_credentials'
-          ? '아이디 또는 비밀번호가 올바르지 않습니다.'
-          : result.reason === 'network'
-            ? '네트워크 오류가 발생했습니다.'
-            : '로그인에 실패했습니다.',
+
+    _loginPromises[siteId] = Promise.resolve().then(() => {
+      const adapter = getSite(siteId);
+      return adapter.login(target.id, target.pw);
+    }).then((result) => {
+      if (result.ok) {
+        saveSession(siteId, result.cookie);
+        set((state) => ({
+          cookies: { ...state.cookies, [siteId]: result.cookie },
+          busy: false,
+        }));
+        return true;
+      }
+      set({
+        busy: false,
+        error:
+          result.reason === 'bad_credentials'
+            ? '아이디 또는 비밀번호가 올바르지 않습니다.'
+            : result.reason === 'network'
+              ? '네트워크 오류가 발생했습니다.'
+              : '로그인에 실패했습니다.',
+      });
+      return false;
+    }).finally(() => {
+      delete _loginPromises[siteId];
     });
-    return false;
+
+    return _loginPromises[siteId]!;
   },
 
-  doLogout: async () => {
-    const cookie = get().cookie;
+  doLogout: async (siteId: SiteId) => {
+    const cookie = get().cookies[siteId];
     set({ busy: true });
-    if (cookie) await apiLogout(cookie);
-    clearSession();
-    set({ cookie: null, busy: false });
+    if (cookie) {
+      try {
+        await getSite(siteId).logout(cookie);
+      } catch {}
+    }
+    clearSession(siteId);
+    set((state) => {
+      const cookies = { ...state.cookies };
+      delete cookies[siteId];
+      return { cookies, busy: false };
+    });
   },
 
-  forget: () => {
-    clearAccount();
-    clearSession();
-    set({ account: null, cookie: null });
+  forget: (siteId: SiteId) => {
+    clearAccount(siteId);
+    clearSession(siteId);
+    set((state) => {
+      const accounts = { ...state.accounts };
+      const cookies = { ...state.cookies };
+      delete accounts[siteId];
+      delete cookies[siteId];
+      return { accounts, cookies };
+    });
   },
 }));

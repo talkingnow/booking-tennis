@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
+import { useSiteStore } from '@/stores/siteStore';
 import { Card, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
 
 export default function Account() {
-  const { account, cookie, busy, error, hydrate, saveCredentials, doLogin, doLogout, forget } =
+  const { accounts, cookies, busy, error, hydrate, saveCredentials, doLogin, doLogout, forget } =
     useAuthStore();
+  const { activeSiteId } = useSiteStore();
+
+  const account = accounts[activeSiteId] ?? null;
+  const cookie = cookies[activeSiteId] ?? null;
+
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [remember, setRemember] = useState(true);
@@ -17,15 +23,15 @@ export default function Account() {
   useEffect(() => {
     if (account) setId(account.id);
     if (account?.remember) setPw(account.pw);
-  }, [account]);
+    else setPw('');
+  }, [account, activeSiteId]);
+
+  const siteLabel = activeSiteId === 'pj' ? '파주시' : '고양시';
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // saveCredentials returns the new account synchronously; pass it directly
-    // to doLogin() to avoid the race condition where Zustand state setter
-    // hasn't propagated yet when doLogin reads get().account.
-    const acc = saveCredentials(id, pw, remember);
-    await doLogin(acc);
+    const acc = saveCredentials(activeSiteId, id, pw, remember);
+    await doLogin(activeSiteId, acc);
   };
 
   return (
@@ -33,7 +39,7 @@ export default function Account() {
       <h1 className="text-xl font-bold">계정 설정</h1>
 
       <Card>
-        <CardTitle>상태</CardTitle>
+        <CardTitle>상태 ({siteLabel})</CardTitle>
         <div className="text-sm space-y-1">
           <div>
             계정 저장: {account ? <span className="text-emerald-400">{account.id}</span> : '없음'}
@@ -46,7 +52,7 @@ export default function Account() {
 
       {!cookie && (
         <Card>
-          <CardTitle>gytennis 로그인</CardTitle>
+          <CardTitle>{siteLabel} 로그인</CardTitle>
           <form className="space-y-3" onSubmit={onSubmit}>
             <div>
               <label className="block text-xs text-slate-400 mb-1">아이디</label>
@@ -92,10 +98,10 @@ export default function Account() {
         <Card>
           <CardTitle>세션 관리</CardTitle>
           <div className="space-y-2">
-            <Button variant="secondary" onClick={() => doLogout()} disabled={busy}>
+            <Button variant="secondary" onClick={() => doLogout(activeSiteId)} disabled={busy}>
               로그아웃
             </Button>
-            <Button variant="danger" onClick={() => forget()} disabled={busy}>
+            <Button variant="danger" onClick={() => forget(activeSiteId)} disabled={busy}>
               계정 삭제 (저장 정보 폐기)
             </Button>
           </div>

@@ -3,14 +3,16 @@ import { Link } from 'react-router-dom';
 import { Card, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { PaymentCountdown } from '@/components/PaymentCountdown';
+import { PolicyNotice } from '@/components/PolicyNotice';
 import { useAuthStore } from '@/stores/authStore';
-import { getDaily } from '@/lib/gytennis/slots';
-import { submitReservation, cancelReservation } from '@/lib/gytennis/reserve';
-import { COURTS, getCourt } from '@/lib/courts';
+import { useSiteStore } from '@/stores/siteStore';
+import { getSite, isRegistered } from '@/lib/sites/registry';
+import { getCourt } from '@/lib/courts';
 import { formatRemaining, startCountdown, type CountdownHandle } from '@/lib/scheduler/countdown';
 import { measureServerOffsetMs } from '@/lib/scheduler/timeSync';
-import { openKcpPayment, isMobile } from '@/lib/payment/handoff';
+import { openKcpPayment } from '@/lib/payment/handoff';
 import { useUiStore } from '@/stores/uiStore';
+import type { KcpForm } from '@/lib/gytennis/types';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -22,7 +24,7 @@ export type PriorityEntry = {
   courtId: number;
   courtNo: number;
   date: string;   // YYYY-MM-DD
-  hour: number;   // slot start hour (gytennis uses even hours: 6,8,...,20)
+  hour: number;   // slot start hour
 };
 
 type CascadeResult = {
@@ -33,8 +35,6 @@ type CascadeResult = {
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
-/** Gytennis 2-hour slot start hours. */
-const SLOT_HOURS = [6, 8, 10, 12, 14, 16, 18, 20];
 const PRIORITY_KEY = 'gyt:priorities';
 
 // ─── storage helpers ──────────────────────────────────────────────────────────
@@ -72,37 +72,97 @@ export function defaultDate(): string {
   return `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-/** Next 25th-at-22:00 in datetime-local format. */
-function defaultOpenDate(): string {
+/** Next 25th-at-22:00 in datetime-local format. (고양시 기본) */
+function defaultOpenDate_gy(): string {
   const now = new Date();
   const candidate = new Date(now.getFullYear(), now.getMonth(), 25, 22, 0, 0, 0);
   if (candidate.getTime() <= now.getTime()) candidate.setMonth(candidate.getMonth() + 1);
   return toLocalInput(candidate);
 }
 
+/**
+ * Next Friday 07:00 (Asia/Seoul) in datetime-local format. (파주시 기본)
+ * If today is Friday and it's before 07:00, returns today at 07:00.
+ * Otherwise returns the next Friday.
+ */
+function defaultOpenDate_pj(): string {
+  // Use a simple offset-based KST calculation (UTC+9)
+  const nowUTC = Date.now();
+  const kstOffset = 9 * 60 * 60 * 1000;
+  const nowKST = new Date(nowUTC + kstOffset);
+
+  // Find next Friday (dayOfWeek 5) at 07:00 KST
+  const dayOfWeek = nowKST.getUTCDay(); // 0=Sun ... 5=Fri
+  let daysUntilFriday = (5 - dayOfWeek + 7) % 7;
+  // If today is Friday but we're already past 07:00 KST, advance one week
+  if (daysUntilFriday === 0) {
+    const currentHourKST = nowKST.getUTCHours();
+    if (currentHourKST >= 7) daysUntilFriday = 7;
+  }
+  const targetKST = new Date(nowUTC + kstOffset + daysUntilFriday * 24 * 60 * 60 * 1000);
+  // Set to 07:00 KST = 07:00 UTC+9
+  targetKST.setUTCHours(7, 0, 0, 0);
+
+  // Convert back to local Date for toLocalInput
+  const localDate = new Date(targetKST.getTime() - kstOffset);
+  return toLocalInput(localDate);
+}
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 export default function Race() {
-  const { cookie, hydrate, doLogin, account, busy } = useAuthStore();
+  const { cookies, accounts, hydrate, doLogin, busy } = useAuthStore();
+  const { activeSiteId } = useSiteStore();
   const setArmed = useUiStore((s) => s.setArmed);
+
+  const account = accounts[activeSiteId] ?? null;
+  const cookie = cookies[activeSiteId] ?? null;
+
+  const adapter = isRegistered(activeSiteId) ? getSite(activeSiteId) : null;
+  const courts = adapter?.courts ?? [];
+  const policy = adapter?.config.policy;
+
+  // Slot hours for this site
+  const SLOT_HOURS = useMemo(() => {
+    if (!policy) return [6, 8, 10, 12, 14, 16, 18, 20];
+    const [start, end] = policy.hours;
+    const hours: number[] = [];
+    for (let h = start; h < end; h++) hours.push(h);
+    return hours;
+  }, [policy]);
 
   // open-day mode — priorities
   const [priorities, setPriorities] = useState<PriorityEntry[]>(() => loadPriorities());
+
   // add-form state
-  const [newCourtId, setNewCourtId] = useState(1);
-  const [newCourtNo, setNewCourtNo] = useState(1);
+  const [newCourtId, setNewCourtId] = useState(() => courts[0]?.id ?? 1);
+  const [newCourtNo, setNewCourtNo] = useState(() => courts[0]?.courtNos[0] ?? 1);
   const [newDate, setNewDate]       = useState(defaultDate());
-  const [newHour, setNewHour]       = useState(12);
+  const [newHour, setNewHour]       = useState(SLOT_HOURS[SLOT_HOURS.length > 4 ? 2 : 0] ?? 12);
+
+  // Default fire time depends on site
+  const [target, setTarget] = useState(() =>
+    activeSiteId === 'pj' ? defaultOpenDate_pj() : defaultOpenDate_gy(),
+  );
+
+  // Update target + form defaults when site changes
+  useEffect(() => {
+    setTarget(activeSiteId === 'pj' ? defaultOpenDate_pj() : defaultOpenDate_gy());
+    const firstCourt = courts[0];
+    if (firstCourt) {
+      setNewCourtId(firstCourt.id);
+      setNewCourtNo(firstCourt.courtNos[0] ?? 1);
+    }
+  }, [activeSiteId, courts]);
 
   // phase / scheduler
-  const [target, setTarget]     = useState(defaultOpenDate());
   const [phase, setPhase]       = useState<Phase>('setup');
   const [remaining, setRemaining] = useState<number | null>(null);
   const [error, setError]       = useState<string | null>(null);
   const handleRef               = useRef<CountdownHandle | null>(null);
 
   // payment
-  const [kcpReady, setKcpReady]   = useState<null | { orderId: string; kcp: import('@/lib/gytennis/types').KcpForm }>(null);
+  const [kcpReady, setKcpReady]   = useState<null | { orderId: string; kcp: KcpForm }>(null);
   const [deadline, setDeadline]   = useState<number | null>(null);
   const [windowClosed, setWindowClosed] = useState(false);
 
@@ -116,11 +176,17 @@ export default function Race() {
   const cascadeResultsRef  = useRef<CascadeResult[]>([]);
   const payConfirmedRef    = useRef(false);
   const kcpReadyRef        = useRef(kcpReady);
-  useEffect(() => { kcpReadyRef.current = kcpReady; },   [kcpReady]);
+  const activeSiteIdRef    = useRef(activeSiteId);
+  useEffect(() => { kcpReadyRef.current = kcpReady; }, [kcpReady]);
   useEffect(() => { prioritiesRef.current = priorities; savePriorities(priorities); }, [priorities]);
+  useEffect(() => { activeSiteIdRef.current = activeSiteId; }, [activeSiteId]);
 
   useEffect(() => { hydrate(); }, [hydrate]);
-  useEffect(() => { if (!cookie && account) doLogin(); }, [cookie, account, doLogin]);
+  useEffect(() => {
+    if (!cookies[activeSiteId] && accounts[activeSiteId]) {
+      doLogin(activeSiteId);
+    }
+  }, [activeSiteId, cookies, accounts, doLogin]);
 
   const targetMs = useMemo(() => new Date(target).getTime(), [target]);
 
@@ -160,7 +226,6 @@ export default function Race() {
     if (targetMs - Date.now() < 1_000)
       return setError('발사 시각이 너무 가깝거나 이미 지났습니다.');
     setError(null);
-    // Reset cascade
     cascadeIdxRef.current = 0;
     cascadeResultsRef.current = [];
     setCascadeIdx(0);
@@ -186,9 +251,11 @@ export default function Race() {
   // ── fire (core) ────────────────────────────────────────────────────────────
 
   const fire = async () => {
+    if (!adapter) { setError('사이트 어댑터가 없습니다.'); setPhase('failed'); return; }
     setArmed(false);
     setPhase('firing');
-    const c = useAuthStore.getState().cookie;
+    const siteId = activeSiteIdRef.current;
+    const c = useAuthStore.getState().cookies[siteId];
     if (!c) { setError('세션이 없습니다.'); setPhase('failed'); return; }
 
     const pList = prioritiesRef.current;
@@ -196,7 +263,7 @@ export default function Race() {
 
     while (idx < pList.length) {
       const entry = pList[idx];
-      const view = await getDaily(entry.courtId, c, entry.date);
+      const view = await adapter.getDaily(entry.courtId, c, entry.date);
       const slot = view?.slots.find(
         (s) => s.courtNo === entry.courtNo && s.hour === entry.hour && s.status === 'available',
       );
@@ -209,7 +276,7 @@ export default function Race() {
         continue;
       }
 
-      const result = await submitReservation([slot], c);
+      const result = await adapter.submitReservation([slot], c);
 
       if (result.ok && result.kcp) {
         pushCascadeResult({ entry, status: 'success', orderId: result.orderId });
@@ -220,38 +287,37 @@ export default function Race() {
         setDeadline(Date.now() + 8 * 60 * 1_000);
         setWindowClosed(false);
         setPhase('success');
-        return; // pause — user pays, then calls tryNext
+        return;
       }
 
-      // Booking failed → continue cascade immediately
       pushCascadeResult({ entry, status: 'failed' });
       idx++;
       cascadeIdxRef.current = idx;
       setCascadeIdx(idx);
     }
 
-    // All priorities tried
     setPhase('cascade-done');
   };
 
-  /** Try the next priority after payment done (or window closed). */
   const tryNext = async () => {
     setKcpReady(null);
     setDeadline(null);
     await fire();
   };
 
-  /** Open KCP popup with payConfirmedRef-based cancel-on-close logic. */
   const openPaymentPopup = () => {
     const current = kcpReadyRef.current;
     if (!current) return;
     payConfirmedRef.current = false;
     openKcpPayment(current.kcp, {
+      siteId: activeSiteIdRef.current,
       onWindowClosed: async () => {
         if (!payConfirmedRef.current) {
-          const c = useAuthStore.getState().cookie;
-          if (c && kcpReadyRef.current) {
-            await cancelReservation(kcpReadyRef.current.orderId, c);
+          const siteId = activeSiteIdRef.current;
+          const c = useAuthStore.getState().cookies[siteId];
+          const ad = isRegistered(siteId) ? getSite(siteId) : null;
+          if (c && ad && kcpReadyRef.current) {
+            await ad.cancelReservation(kcpReadyRef.current.orderId, c);
           }
           setWindowClosed(true);
           await tryNext();
@@ -260,25 +326,22 @@ export default function Race() {
     });
   };
 
-  /** Timer expired → cancel current slot, try next. */
   const handleExpire = async () => {
-    if (!kcpReady) return;
-    const c = useAuthStore.getState().cookie;
-    if (c) await cancelReservation(kcpReady.orderId, c);
+    if (!kcpReady || !adapter) return;
+    const c = useAuthStore.getState().cookies[activeSiteId];
+    if (c) await adapter.cancelReservation(kcpReady.orderId, c);
     setKcpReady(null);
     setDeadline(null);
     await fire();
   };
 
-  /** Manual cancel button. */
   const handleManualCancel = async () => {
-    if (!kcpReady) return;
-    const c = useAuthStore.getState().cookie;
-    if (c) await cancelReservation(kcpReady.orderId, c);
+    if (!kcpReady || !adapter) return;
+    const c = useAuthStore.getState().cookies[activeSiteId];
+    if (c) await adapter.cancelReservation(kcpReady.orderId, c);
     setKcpReady(null);
     setDeadline(null);
     setError(null);
-    // Reset and go back to setup
     cascadeIdxRef.current = 0;
     cascadeResultsRef.current = [];
     setCascadeIdx(0);
@@ -300,12 +363,18 @@ export default function Race() {
 
   // ── render ─────────────────────────────────────────────────────────────────
 
-  // Court No options for the add-form (dynamic based on newCourtId)
-  const newCourtNos = getCourt(newCourtId)?.courtNos ?? [1, 2, 3, 4];
+  const newCourtNos = getCourt(activeSiteId, newCourtId)?.courtNos ?? [1, 2, 3, 4];
+
+  const openDateNote = activeSiteId === 'pj'
+    ? '파주시: 매주 금요일 07:00에 다음주 예약 오픈'
+    : '고양시: 매달 25일 22:00에 다음달 예약 오픈';
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">🚀 오픈일 예약</h1>
+
+      {/* Site policy notice */}
+      <PolicyNotice />
 
       {/* ── SETUP ──────────────────────────────────────────────────────────── */}
       {phase === 'setup' && (
@@ -322,7 +391,7 @@ export default function Race() {
             )}
             <div className="space-y-1 mb-4">
               {priorities.map((e, i) => {
-                const court = getCourt(e.courtId);
+                const court = getCourt(activeSiteId, e.courtId);
                 return (
                   <div key={e.id} className="flex items-center gap-1 bg-slate-800 rounded-lg px-3 py-2">
                     <span className="text-xs text-slate-500 w-5 shrink-0 text-center">{i + 1}</span>
@@ -354,11 +423,11 @@ export default function Race() {
                     onChange={(e) => {
                       const id = Number(e.target.value);
                       setNewCourtId(id);
-                      setNewCourtNo(getCourt(id)?.courtNos[0] ?? 1);
+                      setNewCourtNo(getCourt(activeSiteId, id)?.courtNos[0] ?? 1);
                     }}
                     className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs"
                   >
-                    {COURTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {courts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
                 <div>
@@ -411,9 +480,7 @@ export default function Race() {
               onChange={(e) => setTarget(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
             />
-            <p className="text-xs text-slate-500 mt-2">
-              매달 25일 22:00에 다음달 예약이 오픈됩니다.
-            </p>
+            <p className="text-xs text-slate-500 mt-2">{openDateNote}</p>
           </Card>
 
           {error && (
@@ -472,7 +539,7 @@ export default function Race() {
             <Button onClick={openPaymentPopup} className="w-full">
               결제창 열기 →
             </Button>
-            {!isMobile() && windowClosed && (
+            {windowClosed && (
               <p className="text-xs text-yellow-400">
                 결제창이 닫혔습니다. 결제창 열기를 다시 눌러 재시도하거나, 결제 완료 ✓를 누르세요.
               </p>
@@ -496,7 +563,7 @@ export default function Race() {
             <div className="mt-4 border-t border-slate-700 pt-3">
               <p className="text-xs text-slate-400 mb-2">진행 현황</p>
               {cascadeResults.map((r, i) => {
-                const court = getCourt(r.entry.courtId);
+                const court = getCourt(activeSiteId, r.entry.courtId);
                 return (
                   <div key={r.entry.id} className="flex items-center gap-2 text-xs mb-1">
                     <span className="text-slate-500 w-4">{i + 1}</span>
@@ -523,7 +590,7 @@ export default function Race() {
           <CardTitle>📋 발사 완료</CardTitle>
           <div className="space-y-1 mb-4">
             {cascadeResults.map((r, i) => {
-              const court = getCourt(r.entry.courtId);
+              const court = getCourt(activeSiteId, r.entry.courtId);
               return (
                 <div key={r.entry.id} className="flex items-center gap-2 text-sm">
                   <span className="text-slate-500 w-5 text-center">{i + 1}</span>

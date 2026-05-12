@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/gy/(.+)", "destination": "/api/gy/[...path]" },
+    { "source": "/api/pj/(.+)", "destination": "/api/pj/[...path]" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

@@ -1,25 +1,35 @@
+import { useEffect } from 'react';
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import Home from './routes/Home';
 import Account from './routes/Account';
 import Race from './routes/Race';
 import Quick from './routes/Quick';
 import PaymentResult from './routes/PaymentResult';
+import { SiteSelector } from './components/SiteSelector';
+import { useSiteStore } from './stores/siteStore';
 
 export default function App() {
   const loc = useLocation();
   const isHome = loc.pathname === '/';
+  const { hydrate } = useSiteStore();
+
+  // Hydrate active site from localStorage on mount
+  useEffect(() => { hydrate(); }, [hydrate]);
 
   return (
     <div className="min-h-dvh bg-bg text-slate-100 flex flex-col">
-      <header className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-        <Link to="/" className="font-bold text-lg tracking-tight">
+      <header className="px-4 pt-[env(safe-area-inset-top)] pb-3 border-b border-slate-800 flex items-center justify-between gap-2">
+        <Link to="/" className="font-bold text-lg tracking-tight shrink-0">
           🎾 Booking Tennis
         </Link>
-        {!isHome && (
-          <Link to="/" className="text-sm text-slate-400 hover:text-slate-200">
-            홈
-          </Link>
-        )}
+        <div className="flex items-center gap-3">
+          <SiteSelector />
+          {!isHome && (
+            <Link to="/" className="text-sm text-slate-400 hover:text-slate-200 shrink-0">
+              홈
+            </Link>
+          )}
+        </div>
       </header>
       <main className="flex-1 px-4 py-6 max-w-xl w-full mx-auto">
         <Routes>
@@ -31,7 +41,7 @@ export default function App() {
         </Routes>
       </main>
       <footer className="px-4 py-3 text-center text-xs text-slate-500 border-t border-slate-800">
-        gytennis.or.kr unofficial client · v0.1.0
+        gytennis · pjtennis unofficial client · v0.2.0
       </footer>
     </div>
   );
