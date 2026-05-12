@@ -74,6 +74,11 @@ function parseCell(cell: HTMLElement, displayedCourtNo: number): Slot | null {
 
   const status = classifyCell(cell, yxjorg);
 
+  // Read the isvkrr[] value (present only in available cells; differs from yxjorg
+  // in the last token which carries the actual price instead of 0).
+  const isvkrrInput = cell.querySelector<HTMLInputElement>('input[name="isvkrr[]"]');
+  const isvkrrRaw = isvkrrInput?.getAttribute('value') ?? '';
+
   return {
     date,
     courtId,
@@ -83,6 +88,7 @@ function parseCell(cell: HTMLElement, displayedCourtNo: number): Slot | null {
     priceFlag,
     status,
     raw,
+    isvkrrRaw,
   };
 }
 

@@ -11,7 +11,7 @@ import { COURTS, courtName } from '@/lib/courts';
 import type { DailyView, Slot } from '@/lib/gytennis/types';
 
 export default function Quick() {
-  const { cookie, hydrate, doLogin, account } = useAuthStore();
+  const { cookie, hydrate, doLogin, account, busy } = useAuthStore();
   const fav = useFavoritesStore();
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [data, setData] = useState<Map<number, DailyView | null>>(new Map());
@@ -23,6 +23,13 @@ export default function Quick() {
     hydrate();
     fav.hydrate();
   }, [hydrate, fav]);
+
+  // Auto-login when session is missing but credentials are stored
+  useEffect(() => {
+    if (!cookie && account) {
+      doLogin();
+    }
+  }, [cookie, account, doLogin]);
 
   const courtIds = fav.list.length
     ? Array.from(new Set(fav.list.map((f) => f.courtId)))
@@ -96,8 +103,8 @@ export default function Quick() {
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
             />
           </div>
-          <Button variant="secondary" className="w-auto px-4" onClick={refresh} disabled={loading || !cookie}>
-            {loading ? '…' : '↻'}
+          <Button variant="secondary" className="w-auto px-4" onClick={refresh} disabled={loading || !cookie || busy}>
+            {loading || busy ? '…' : '↻'}
           </Button>
         </div>
         <p className="text-xs text-slate-500 mt-2">

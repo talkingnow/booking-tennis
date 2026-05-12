@@ -26,6 +26,12 @@ export type Slot = {
   status: SlotStatus;
   /** The original yxjorg[] value, e.g. "2026-05-12|1|1|6|0" */
   raw: string;
+  /**
+   * The isvkrr[] value for this slot, e.g. "2026-05-12|1|1|6|8000".
+   * Differs from raw: last token is the actual price, not 0.
+   * Empty string for non-available slots (no isvkrr input in DOM).
+   */
+  isvkrrRaw: string;
 };
 
 export type CourtMeta = {

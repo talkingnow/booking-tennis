@@ -23,7 +23,9 @@ export async function submitReservation(
   const body = new URLSearchParams();
   body.set('cvalue', String(first.courtId));
   body.set('cdate', first.date);
-  for (const s of slots) body.append('isvkrr[]', s.raw);
+  // isvkrrRaw carries the actual price token (e.g. "2026-05-12|1|1|6|8000").
+  // raw (yxjorg) has price=0 and is rejected by the server.
+  for (const s of slots) body.append('isvkrr[]', s.isvkrrRaw || s.raw);
   body.set('van_code', options.vanCode ?? '');
 
   const res = await gyFetch('/rsvConfirm', { method: 'POST', body, cookie });
