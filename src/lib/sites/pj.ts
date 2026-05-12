@@ -15,8 +15,8 @@ const PJ_CONFIG: SiteConfig = {
   name: '파주시',
   origin: 'https://www.pjtennis.or.kr',
   proxyBase: '/api/pj',
-  // TODO(M0/R2): Replace with actual session cookie name from live pjtennis login.
-  sessionCookieName: 'pjssn',
+  // R2 확정 (M0 curl 2026-05-12): Set-Cookie: pjtssn=… 확인됨
+  sessionCookieName: 'pjtssn',
   policy: PJ_POLICY,
 };
 
