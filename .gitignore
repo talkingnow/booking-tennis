@@ -15,3 +15,4 @@ coverage/
 # 정찰 자료 (자격증명 포함 가능)
 *.har
 _workspace/*.har
+.vercel
