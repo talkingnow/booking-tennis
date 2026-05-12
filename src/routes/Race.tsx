@@ -16,46 +16,43 @@ import { openKcpPayment } from '@/lib/payment/handoff';
 import { useUiStore } from '@/stores/uiStore';
 
 type Phase = 'setup' | 'armed' | 'firing' | 'success' | 'failed';
+type FireMode = 'normal' | 'open-day';
 
-function defaultTarget(): string {
-  // Default: next 22:00 (monthly racing opening time)
-  const d = new Date();
-  d.setSeconds(0, 0);
-  if (d.getHours() >= 22) d.setDate(d.getDate() + 1);
-  d.setHours(22, 0, 0, 0);
-  return toLocalInput(d);
-}
+/** Available hours for the priority picker (gytennis courts operate 6–21). */
+const HOUR_OPTIONS = Array.from({ length: 16 }, (_, i) => i + 6); // 6..21
 
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function defaultTarget(): string {
+  const d = new Date();
+  if (d.getHours() >= 22) d.setDate(d.getDate() + 1);
+  d.setHours(22, 0, 0, 0);
+  return toLocalInput(d);
+}
+
 /**
- * Compute the next-month date for the same day, clamping to the last day of
- * the target month to avoid JS date overflow (e.g. Jan 31 → Feb 28, not Mar 3).
+ * Next-month date for the same day (clamped to last day of target month).
  * Exported for unit testing.
  */
 export function defaultDate(): string {
   const now = new Date();
   const y = now.getFullYear();
-  const m = now.getMonth(); // 0-based
+  const m = now.getMonth();
   const nextMonth = m + 1 > 11 ? 0 : m + 1;
   const nextYear = m + 1 > 11 ? y + 1 : y;
-  // Last day of nextMonth (month+1 day 0 = last day of month)
   const lastDay = new Date(nextYear, nextMonth + 1, 0).getDate();
   const day = Math.min(now.getDate(), lastDay);
   return `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-/** Returns the next 25th-at-22:00 datetime-local string.
- *  If today is before the 25th (or exactly 25th before 22:00), returns this month's 25th.
- *  Otherwise returns next month's 25th. */
+/** Next 25th-at-22:00 in datetime-local format. */
 function defaultOpenDate(): string {
   const now = new Date();
   const candidate = new Date(now.getFullYear(), now.getMonth(), 25, 22, 0, 0, 0);
   if (candidate.getTime() <= now.getTime()) {
-    // Already past this month's opening — go to next month
     candidate.setMonth(candidate.getMonth() + 1);
   }
   return toLocalInput(candidate);
@@ -64,12 +61,19 @@ function defaultOpenDate(): string {
 export default function Race() {
   const { cookie, hydrate, doLogin, account, busy } = useAuthStore();
   const setArmed = useUiStore((s) => s.setArmed);
+
+  const [fireMode, setFireMode] = useState<FireMode>('normal');
   const [courtId, setCourtId] = useState(1);
   const [date, setDate] = useState(defaultDate());
   const [target, setTarget] = useState(defaultTarget());
   const [daily, setDaily] = useState<DailyView | null>(null);
   const [loadingDaily, setLoadingDaily] = useState(false);
   const [picked, setPicked] = useState<Slot[]>([]);
+
+  // Open-day mode: priority hours in order (highest priority = index 0)
+  const [priorityHours, setPriorityHours] = useState<number[]>([]);
+  const [addHour, setAddHour] = useState<number>(12);
+
   const [phase, setPhase] = useState<Phase>('setup');
   const [remaining, setRemaining] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,16 +82,23 @@ export default function Race() {
   const [windowClosed, setWindowClosed] = useState(false);
   const handleRef = useRef<CountdownHandle | null>(null);
 
-  useEffect(() => {
-    hydrate();
-  }, [hydrate]);
+  useEffect(() => { hydrate(); }, [hydrate]);
 
-  // Login on demand
   useEffect(() => {
-    if (!cookie && account) {
-      doLogin();
-    }
+    if (!cookie && account) doLogin();
   }, [cookie, account, doLogin]);
+
+  // When switching to open-day mode, auto-set target to next 25th 22:00
+  useEffect(() => {
+    if (fireMode === 'open-day') {
+      setTarget(defaultOpenDate());
+      setDaily(null);
+      setPicked([]);
+    } else {
+      setTarget(defaultTarget());
+    }
+    setError(null);
+  }, [fireMode]);
 
   const targetMs = useMemo(() => new Date(target).getTime(), [target]);
 
@@ -97,8 +108,7 @@ export default function Race() {
     setLoadingDaily(true);
     setError(null);
 
-    // Validate session before fetching — gytennis returns 200 login page for
-    // expired sessions so we can't rely on HTTP status alone.
+    // Validate session first — gytennis returns 200 login page for expired sessions.
     const valid = await isSessionValid(currentCookie);
     let activeCookie = currentCookie;
     if (!valid) {
@@ -125,13 +135,30 @@ export default function Race() {
     setLoadingDaily(false);
   };
 
+  // --- Priority hours helpers ---
+  const addPriority = () => {
+    if (priorityHours.includes(addHour)) return;
+    setPriorityHours((p) => [...p, addHour]);
+    // Move addHour selector to next unused hour
+    const next = HOUR_OPTIONS.find((h) => h !== addHour && ![...priorityHours, addHour].includes(h));
+    if (next != null) setAddHour(next);
+  };
+  const removePriority = (h: number) => setPriorityHours((p) => p.filter((x) => x !== h));
+  const movePriority = (idx: number, dir: -1 | 1) => {
+    const arr = [...priorityHours];
+    const swap = idx + dir;
+    if (swap < 0 || swap >= arr.length) return;
+    [arr[idx], arr[swap]] = [arr[swap], arr[idx]];
+    setPriorityHours(arr);
+  };
+
   const arm = async () => {
-    if (!picked.length) return setError('슬롯을 1개 이상 선택하세요.');
-    if (targetMs - Date.now() < 1_000) return setError('타겟 시각이 너무 가깝거나 지났습니다.');
+    if (fireMode === 'normal' && !picked.length) return setError('슬롯을 1개 이상 선택하세요.');
+    if (fireMode === 'open-day' && !priorityHours.length) return setError('우선순위 시간을 1개 이상 입력하세요.');
+    if (targetMs - Date.now() < 1_000) return setError('발사 시각이 너무 가깝거나 이미 지났습니다.');
     setError(null);
     setPhase('armed');
     setArmed(true);
-    // Measure server clock offset before arming (3 HEAD samples)
     const offsetMs = await measureServerOffsetMs(3);
     handleRef.current = startCountdown({
       targetMs,
@@ -140,13 +167,6 @@ export default function Race() {
       onTick: (ms) => setRemaining(ms),
       onFire: () => fire(),
     });
-  };
-
-  /** Skip countdown and fire immediately. */
-  const fireImmediate = async () => {
-    if (!picked.length) return setError('슬롯을 1개 이상 선택하세요.');
-    setError(null);
-    await fire();
   };
 
   const cancelArm = () => {
@@ -161,14 +181,36 @@ export default function Race() {
     setArmed(false);
     setPhase('firing');
     const c = useAuthStore.getState().cookie;
-    if (!c) {
-      setError('세션이 없습니다.');
-      setPhase('failed');
-      return;
+    if (!c) { setError('세션이 없습니다.'); setPhase('failed'); return; }
+
+    let slotsToBook: Slot[];
+
+    if (fireMode === 'open-day') {
+      // Slots just opened — fetch now and pick by priority
+      const view = await getDaily(courtId, c, date);
+      if (!view) {
+        setError('슬롯 조회 실패. 네트워크 오류이거나 세션이 만료되었습니다.');
+        setPhase('failed');
+        return;
+      }
+      const limit = view.meta.dailyLimit || 2;
+      const matched = priorityHours
+        .map((h) => view.slots.find((s) => s.hour === h && s.status === 'available'))
+        .filter((s): s is Slot => s != null)
+        .slice(0, limit);
+      if (!matched.length) {
+        setError('우선순위 시간대에 예약 가능한 슬롯이 없습니다.');
+        setPhase('failed');
+        return;
+      }
+      slotsToBook = matched;
+    } else {
+      slotsToBook = picked;
     }
-    const result = await submitReservation(picked, c);
+
+    const result = await submitReservation(slotsToBook, c);
     if (result.ok && result.kcp) {
-      setKcpReady(submitOk(result.orderId, result.kcp));
+      setKcpReady(submitOk(result.orderId!, result.kcp));
       setDeadline(Date.now() + 8 * 60 * 1_000);
       setWindowClosed(false);
       setPhase('success');
@@ -181,7 +223,6 @@ export default function Race() {
     }
   };
 
-  /** Called when 8-min countdown expires → auto cancel. */
   const handleExpire = async () => {
     if (!kcpReady) return;
     const c = useAuthStore.getState().cookie;
@@ -190,7 +231,6 @@ export default function Race() {
     setPhase('failed');
   };
 
-  /** Called when user clicks "지금 취소". */
   const handleManualCancel = async () => {
     if (!kcpReady) return;
     const c = useAuthStore.getState().cookie;
@@ -204,9 +244,7 @@ export default function Race() {
       <Card>
         <CardTitle>계정 필요</CardTitle>
         <p className="text-sm text-slate-400 mb-3">먼저 계정을 등록해 주세요.</p>
-        <Link to="/account">
-          <Button>계정 설정으로</Button>
-        </Link>
+        <Link to="/account"><Button>계정 설정으로</Button></Link>
       </Card>
     );
   }
@@ -217,6 +255,23 @@ export default function Race() {
 
       {phase === 'setup' && (
         <>
+          {/* Mode toggle */}
+          <div className="flex rounded-lg overflow-hidden border border-slate-700">
+            {(['normal', 'open-day'] as FireMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setFireMode(m)}
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${
+                  fireMode === m
+                    ? 'bg-accent text-bg'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {m === 'normal' ? '⏱ 일반 발사' : '📅 오픈일 발사'}
+              </button>
+            ))}
+          </div>
+
           <Card>
             <CardTitle>1. 코트·날짜</CardTitle>
             <div className="grid grid-cols-2 gap-3">
@@ -228,9 +283,7 @@ export default function Race() {
                   className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
                 >
                   {COURTS.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </div>
@@ -244,14 +297,22 @@ export default function Race() {
                 />
               </div>
             </div>
-            <div className="mt-3">
-              <Button variant="secondary" onClick={loadSlots} disabled={!cookie || loadingDaily}>
-                {loadingDaily ? '불러오는 중…' : '슬롯 조회'}
-              </Button>
-            </div>
+            {fireMode === 'normal' && (
+              <div className="mt-3">
+                <Button variant="secondary" onClick={loadSlots} disabled={!cookie || loadingDaily}>
+                  {loadingDaily ? '불러오는 중…' : '슬롯 조회'}
+                </Button>
+              </div>
+            )}
+            {fireMode === 'open-day' && (
+              <p className="text-xs text-slate-500 mt-2">
+                오픈일(25일 22:00) 에 슬롯 조회 후 아래 우선순위 시간 순으로 자동 예약합니다.
+              </p>
+            )}
           </Card>
 
-          {daily && (
+          {/* Step 2: slot picker (normal) OR priority hours (open-day) */}
+          {fireMode === 'normal' && daily && (
             <Card>
               <CardTitle>2. 슬롯 선택 ({picked.length}/{daily.meta.dailyLimit || 2})</CardTitle>
               <SlotPicker
@@ -271,6 +332,62 @@ export default function Race() {
             </Card>
           )}
 
+          {fireMode === 'open-day' && (
+            <Card>
+              <CardTitle>2. 우선순위 시간 입력</CardTitle>
+              <p className="text-xs text-slate-400 mb-3">
+                발사 시각에 슬롯을 조회하여 위에서부터 순서대로 예약합니다.
+              </p>
+
+              {priorityHours.length === 0 && (
+                <p className="text-xs text-slate-500 mb-3">아직 입력된 시간이 없습니다.</p>
+              )}
+
+              <div className="space-y-1 mb-3">
+                {priorityHours.map((h, i) => (
+                  <div key={h} className="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-2">
+                    <span className="text-xs text-slate-500 w-4 shrink-0">{i + 1}</span>
+                    <span className="flex-1 text-sm font-mono">{String(h).padStart(2, '0')}:00</span>
+                    <button
+                      onClick={() => movePriority(i, -1)}
+                      disabled={i === 0}
+                      className="text-slate-400 hover:text-slate-200 disabled:opacity-30 px-1 min-h-[32px]"
+                      aria-label="위로"
+                    >▲</button>
+                    <button
+                      onClick={() => movePriority(i, 1)}
+                      disabled={i === priorityHours.length - 1}
+                      className="text-slate-400 hover:text-slate-200 disabled:opacity-30 px-1 min-h-[32px]"
+                      aria-label="아래로"
+                    >▼</button>
+                    <button
+                      onClick={() => removePriority(h)}
+                      className="text-red-400 hover:text-red-300 px-1 min-h-[32px]"
+                      aria-label="삭제"
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+
+              {priorityHours.length < HOUR_OPTIONS.length && (
+                <div className="flex gap-2">
+                  <select
+                    value={addHour}
+                    onChange={(e) => setAddHour(Number(e.target.value))}
+                    className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
+                  >
+                    {HOUR_OPTIONS.filter((h) => !priorityHours.includes(h)).map((h) => (
+                      <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
+                    ))}
+                  </select>
+                  <Button variant="secondary" onClick={addPriority} className="w-auto px-4">
+                    추가
+                  </Button>
+                </div>
+              )}
+            </Card>
+          )}
+
           <Card>
             <CardTitle>3. 발사 시각</CardTitle>
             <input
@@ -279,25 +396,27 @@ export default function Race() {
               onChange={(e) => setTarget(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
             />
-            <div className="flex gap-2 mt-2">
-              <button
-                type="button"
-                onClick={() => setTarget(toLocalInput(new Date()))}
-                className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300"
-              >
-                ⚡ 지금으로 설정
-              </button>
-              <button
-                type="button"
-                onClick={() => setTarget(defaultOpenDate())}
-                className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300"
-              >
-                📅 오픈일 25일 22:00
-              </button>
-            </div>
-            <p className="text-xs text-slate-500 mt-2">
-              본인 폰 시계 기준 정각±100ms 발사.
-            </p>
+            {fireMode === 'normal' && (
+              <div className="flex gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setTarget(defaultOpenDate())}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300"
+                >
+                  📅 오픈일 25일 22:00
+                </button>
+              </div>
+            )}
+            {fireMode === 'open-day' && (
+              <p className="text-xs text-slate-500 mt-2">
+                매달 25일 22:00에 다음달 예약이 오픈됩니다. 정확한 시각에 발사합니다.
+              </p>
+            )}
+            {fireMode === 'normal' && (
+              <p className="text-xs text-slate-500 mt-2">
+                본인 폰 시계 기준 정각±100ms 발사.
+              </p>
+            )}
           </Card>
 
           {error && (
@@ -306,19 +425,16 @@ export default function Race() {
             </Card>
           )}
 
-          <div className="flex gap-2">
-            <Button onClick={arm} disabled={!picked.length || !cookie} className="flex-1">
-              ⏱ 발사 대기
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={fireImmediate}
-              disabled={!picked.length || !cookie}
-              className="flex-1"
-            >
-              ⚡ 즉시 발사
-            </Button>
-          </div>
+          <Button
+            onClick={arm}
+            disabled={
+              !cookie ||
+              (fireMode === 'normal' && !picked.length) ||
+              (fireMode === 'open-day' && !priorityHours.length)
+            }
+          >
+            ⏱ 발사 대기
+          </Button>
         </>
       )}
 
@@ -328,18 +444,23 @@ export default function Race() {
           <p className="text-5xl font-mono tabular-nums text-accent">
             {remaining != null ? formatRemaining(remaining) : '--:--.---'}
           </p>
+          {fireMode === 'open-day' && (
+            <p className="text-xs text-yellow-400 mt-3">
+              발사 시 슬롯 조회 후 우선순위 순으로 자동 예약
+            </p>
+          )}
           <p className="text-xs text-slate-500 mt-4">앱을 닫지 마세요. 화면 자동 꺼짐 방지 권장.</p>
           <div className="mt-6">
-            <Button variant="danger" onClick={cancelArm}>
-              취소
-            </Button>
+            <Button variant="danger" onClick={cancelArm}>취소</Button>
           </div>
         </Card>
       )}
 
       {phase === 'firing' && (
         <Card className="text-center py-12">
-          <p className="text-xl font-bold text-accent animate-pulse">발사 중…</p>
+          <p className="text-xl font-bold text-accent animate-pulse">
+            {fireMode === 'open-day' ? '슬롯 조회 중…' : '발사 중…'}
+          </p>
           <p className="text-xs text-slate-500 mt-2">서버 응답 대기</p>
         </Card>
       )}
@@ -355,20 +476,12 @@ export default function Race() {
             </p>
           )}
           <Button
-            onClick={() =>
-              openKcpPayment(kcpReady.kcp, {
-                onWindowClosed: () => setWindowClosed(true),
-              })
-            }
+            onClick={() => openKcpPayment(kcpReady.kcp, { onWindowClosed: () => setWindowClosed(true) })}
           >
             결제창 열기 →
           </Button>
           {deadline && (
-            <PaymentCountdown
-              deadline={deadline}
-              onExpire={handleExpire}
-              onCancel={handleManualCancel}
-            />
+            <PaymentCountdown deadline={deadline} onExpire={handleExpire} onCancel={handleManualCancel} />
           )}
         </Card>
       )}
@@ -378,19 +491,16 @@ export default function Race() {
           <CardTitle>❌ 실패</CardTitle>
           <p className="text-sm text-red-300 mb-3">{error}</p>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => setPhase('setup')}>
-              다시 시도
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={async () => {
-                setPhase('setup');
-                await loadSlots();
-              }}
-              disabled={!cookie || loadingDaily}
-            >
-              슬롯 재조회
-            </Button>
+            <Button variant="secondary" onClick={() => setPhase('setup')}>다시 시도</Button>
+            {fireMode === 'normal' && (
+              <Button
+                variant="secondary"
+                onClick={async () => { setPhase('setup'); await loadSlots(); }}
+                disabled={!cookie || loadingDaily}
+              >
+                슬롯 재조회
+              </Button>
+            )}
           </div>
         </Card>
       )}
@@ -408,15 +518,10 @@ function submitOk(orderId: string, kcp: import('@/lib/gytennis/types').KcpForm) 
 
 function reasonText(reason: string): string {
   switch (reason) {
-    case 'not_logged_in':
-      return '세션이 만료되었습니다. 다시 로그인해 주세요.';
-    case 'already_taken':
-      return '이미 다른 사용자가 선점했습니다.';
-    case 'daily_limit':
-      return '일일 예약 한도를 초과했습니다.';
-    case 'per_court_limit':
-      return '동일 코트 예약 한도를 초과했습니다.';
-    default:
-      return '예약에 실패했습니다.';
+    case 'not_logged_in': return '세션이 만료되었습니다. 다시 로그인해 주세요.';
+    case 'already_taken': return '이미 다른 사용자가 선점했습니다.';
+    case 'daily_limit': return '일일 예약 한도를 초과했습니다.';
+    case 'per_court_limit': return '동일 코트 예약 한도를 초과했습니다.';
+    default: return '예약에 실패했습니다.';
   }
 }

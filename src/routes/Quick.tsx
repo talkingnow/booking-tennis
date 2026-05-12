@@ -134,7 +134,11 @@ export default function Quick() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">⚡ 간편 예약</h1>
+      <h1 className="text-xl font-bold">⚡ 즉시 예약</h1>
+      <p className="text-xs text-slate-400 -mt-2">
+        슬롯을 탭하면 바로 예약합니다.
+        {fav.list.length === 0 && ' 즐겨찾기 코트를 등록하면 해당 코트만 표시됩니다.'}
+      </p>
 
       <Card>
         <div className="flex gap-2 items-end">
@@ -157,7 +161,9 @@ export default function Quick() {
           </Button>
         </div>
         <p className="text-xs text-slate-500 mt-2">
-          {fav.list.length ? `즐겨찾기 ${courtIds.length}곳` : '즐겨찾기 비어있음 → 전체 코트 표시'}
+          {fav.list.length
+            ? `즐겨찾기 코트 ${courtIds.length}곳 표시 중 · ☆ 버튼으로 추가/제거`
+            : '즐겨찾기 없음 → 전체 코트 표시'}
         </p>
       </Card>
 
