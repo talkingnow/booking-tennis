@@ -41,7 +41,7 @@ export type SiteConfig = {
   /** Proxy base path served by Vercel function */
   proxyBase: string; // '/api/gy' | '/api/pj'
   /** Session cookie name on the upstream site (M0 확정) */
-  sessionCookieName: string; // 'gytssn' | 'pjssn' (R2 — placeholder)
+  sessionCookieName: string; // 'gytssn' (gy) | 'pjtssn' (pj, R2 확정)
   policy: SitePolicy;
 };
 
