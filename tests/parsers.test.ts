@@ -16,14 +16,17 @@ describe('slotParser', () => {
     expect(slots).toHaveLength(32);
   });
 
-  it('classifies slots into available/reserved/blocked', () => {
+  it('classifies slots: isvkrr=available, ctooltip-trigger=reserved, disabled=blocked', () => {
     const slots = parseSlots(html);
     const buckets = { available: 0, reserved: 0, blocked: 0 };
     slots.forEach((s) => buckets[s.status]++);
-    // From recon: 15 available, 8 reserved, 9 blocked
-    expect(buckets.available).toBe(15);
-    expect(buckets.reserved).toBe(8);
-    expect(buckets.blocked).toBe(9);
+    // Live gytennis verified (2026-05-12 fixture daily/1):
+    //   7 cells have <input name="isvkrr[]"> alone → available
+    //   23 cells have ctooltip-trigger (15 with "0|" + 8 with "1|") → reserved
+    //   2 cells have yxjorg[disabled] → blocked
+    expect(buckets.available).toBe(7);
+    expect(buckets.reserved).toBe(23);
+    expect(buckets.blocked).toBe(2);
   });
 
   it('extracts date/courtId/displayed courtNo/hour from header + raw value', () => {
@@ -45,11 +48,10 @@ describe('slotParser', () => {
     expect(internals).toEqual([13, 14, 15, 16]);
   });
 
-  it('classifies isvkrr-present cells as blocked (not available)', () => {
+  it('classifies isvkrr-present cells as AVAILABLE (gytennis renders them as pickable)', () => {
     const slots = parseSlots(html);
-    // Daily_1 has 9 blocked total: 2 hard-disabled + 7 isvkrr-soft-blocked
-    const blocked = slots.filter((s) => s.status === 'blocked');
-    expect(blocked.length).toBe(9);
+    const available = slots.filter((s) => s.status === 'available');
+    expect(available.length).toBe(7);
   });
 
   it('returns [] for non-daily HTML', () => {

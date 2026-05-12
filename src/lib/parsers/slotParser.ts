@@ -5,28 +5,27 @@ import type { Slot, SlotStatus } from '../gytennis/types';
  *
  * Layout (single <table class="wholeTable">):
  *   <tr>
- *     <td>  [time labels: 06:00~08:00, 08:00~10:00, ..., 20:00~22:00]
- *     <td>  ["1 코트" or "9 코트" header] + 8 td.resTag cells
- *     <td>  next court column
+ *     <td>  [time labels: 06:00~08:00, ..., 20:00~22:00]
+ *     <td>  ["1 코트" header] + 8 td.resTag cells
  *     ...
  *
- * Classification per cell:
- *   - yxjorg has `disabled` attribute        → blocked (예약불가)
- *   - has `<input name="isvkrr[]">` sibling  → blocked (soft-blocked; no UI hint on
- *                                              the gytennis site, not pickable)
- *   - ctooltip-trigger data-ctooltip="0|.."  → available
- *   - ctooltip-trigger data-ctooltip="1|.."  → reserved (by another user)
- *   - otherwise                              → blocked (defensive default)
+ * Cell classification (verified against live gytennis site, 2026-05-12):
+ *   - yxjorg has `disabled`                  → blocked (truly unavailable)
+ *   - has `<div class="ctooltip-trigger">`   → reserved (someone has it; the
+ *     (with fa-user-clock icon, regardless    user-clock icon is the visual
+ *      of data-ctooltip="0|" or "1|")         hint shown on the site)
+ *   - has `<input name="isvkrr[]">` sibling  → available (pickable, no icon
+ *     (without `disabled`)                    rendered on the site)
+ *   - otherwise                              → blocked (defensive)
  *
  * The displayed court number comes from the column header text (e.g. "9 코트"),
- * NOT from the yxjorg `value` 3rd token (which is a site-internal id).
+ * NOT from the yxjorg `value` 3rd token (a site-internal id).
  */
 export function parseSlots(html: string): Slot[] {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const wholeTable = doc.querySelector<HTMLElement>('table.wholeTable');
   if (!wholeTable) return [];
 
-  // First top-level TR holds 1 time-label TD + N court column TDs.
   const topRow = wholeTable.querySelector<HTMLTableRowElement>(':scope > tbody > tr, :scope > tr');
   if (!topRow) return [];
   const columns = Array.from(topRow.children).filter(
@@ -34,7 +33,6 @@ export function parseSlots(html: string): Slot[] {
   ) as HTMLElement[];
 
   const out: Slot[] = [];
-  // Skip column 0 (time labels). Columns 1..N are court columns.
   for (let i = 1; i < columns.length; i++) {
     const col = columns[i];
     const displayedCourtNo = parseDisplayedCourtNo(col);
@@ -49,23 +47,12 @@ export function parseSlots(html: string): Slot[] {
   return out;
 }
 
-/**
- * Extract the user-visible court number from a column TD by reading the FIRST
- * text token of the column header. Handles "1 코트", "9 코트", etc.
- *
- * If the column does not start with a number, returns null (defensive).
- */
 function parseDisplayedCourtNo(columnTd: HTMLElement): number | null {
-  // The header is rendered as `<table class="custom"><tr><td>9 코트</td>...</table>`
-  // or sometimes directly as text. Grab the first text-bearing element.
-  // Use textContent then take the first number that appears BEFORE the first resTag.
-  // Safest: clone, remove resTag descendants, then read text.
   const clone = columnTd.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('td.resTag').forEach((n) => n.remove());
   const text = (clone.textContent || '').trim();
   const m = text.match(/(\d+)\s*코트/);
   if (m) return Number(m[1]);
-  // Fallback: any leading number.
   const m2 = text.match(/^\s*(\d+)/);
   return m2 ? Number(m2[1]) : null;
 }
@@ -100,25 +87,26 @@ function parseCell(cell: HTMLElement, displayedCourtNo: number): Slot | null {
 }
 
 function classifyCell(cell: HTMLElement, yxjorg: HTMLInputElement): SlotStatus {
-  // Hard-blocked: yxjorg is disabled
+  // Hard-blocked (예약불가): yxjorg explicitly disabled.
   if (yxjorg.hasAttribute('disabled')) return 'blocked';
 
-  // Soft-blocked: isvkrr present (regardless of disabled) means the slot
-  // is not pickable. On the gytennis site these render with no visual
-  // indicator (empty cell). The user cannot click them.
-  const isvkrr = cell.querySelector<HTMLInputElement>('input[name="isvkrr[]"]');
-  if (isvkrr) return 'blocked';
+  // Reserved: ctooltip-trigger element is present. The site renders the
+  // fa-user-clock icon and shows reservation info on hover. Both
+  // data-ctooltip="0|..." and "1|..." map here — the leading digit
+  // distinguishes pending vs paid, not availability.
+  const tip = cell.querySelector<HTMLElement>('.ctooltip-trigger');
+  if (tip) return 'reserved';
 
-  const tip = cell.querySelector<HTMLElement>('.ctooltip-trigger[data-ctooltip]');
-  const flag = tip?.getAttribute('data-ctooltip')?.charAt(0);
-  if (flag === '0') return 'available';
-  if (flag === '1') return 'reserved';
+  // Available: a non-disabled isvkrr input is the site's "pickable" marker.
+  // The cell renders empty (no icon) on the site, signaling free pickup.
+  const isvkrr = cell.querySelector<HTMLInputElement>('input[name="isvkrr[]"]');
+  if (isvkrr && !isvkrr.hasAttribute('disabled')) return 'available';
+
   return 'blocked';
 }
 
 /**
- * Group slots by displayed courtNo (== gytennis website column).
- * Useful for the favorites/quick-reserve grid UI.
+ * Group slots by displayed courtNo.
  */
 export function groupByCourtNo(slots: Slot[]): Map<number, Slot[]> {
   const m = new Map<number, Slot[]>();

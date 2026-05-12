@@ -11,20 +11,21 @@ const hourBuckets = [6, 8, 10, 12, 14, 16, 18, 20];
 const statusStyle: Record<Slot['status'], string> = {
   available: 'bg-slate-800 border-slate-600 hover:border-accent cursor-pointer text-slate-200',
   reserved: 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed',
-  blocked: 'bg-slate-900 border-slate-800 text-slate-700 cursor-not-allowed opacity-40',
+  blocked: 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed',
 };
 
-const statusGlyph: Record<Slot['status'], string> = {
-  available: '○',
-  reserved: '×',
-  blocked: '',
-};
+// Only two visual states (per user request):
+//   ○ = available (pickable)
+//   × = anything else (reserved or blocked)
+function glyph(s: Slot): string {
+  return s.status === 'available' ? '○' : '×';
+}
 
-const statusLabel: Record<Slot['status'], string> = {
-  available: '예약 가능',
-  reserved: '이미 예약됨',
-  blocked: '선택 불가',
-};
+function label(s: Slot): string {
+  if (s.status === 'available') return '예약 가능';
+  if (s.status === 'reserved') return '이미 예약됨';
+  return '예약 불가';
+}
 
 /**
  * Slot grid matching the gytennis website layout:
@@ -32,11 +33,8 @@ const statusLabel: Record<Slot['status'], string> = {
  *   rows    = 2-hour time buckets (06~08, 08~10, ...)
  */
 export function SlotPicker({ slots, selected, onToggle }: Props) {
-  // Columns: displayed court numbers in ascending order
   const courtNos = Array.from(new Set(slots.map((s) => s.courtNo))).sort((a, b) => a - b);
-
-  const isSelected = (s: Slot) =>
-    selected.some((x) => x.raw === s.raw);
+  const isSelected = (s: Slot) => selected.some((x) => x.raw === s.raw);
 
   return (
     <div className="overflow-x-auto -mx-2">
@@ -61,12 +59,16 @@ export function SlotPicker({ slots, selected, onToggle }: Props) {
               </td>
               {courtNos.map((no) => {
                 const s = slots.find((x) => x.courtNo === no && x.hour === h);
-                if (!s)
+                if (!s) {
+                  // No cell at all for this slot — render as × (consistent binary view)
                   return (
                     <td key={no} className="p-0">
-                      <div className="h-10 rounded bg-slate-900 border border-slate-800 opacity-30" />
+                      <div className="h-10 rounded bg-slate-900 border border-slate-800 text-slate-700 flex items-center justify-center">
+                        ×
+                      </div>
                     </td>
                   );
+                }
                 const sel = isSelected(s);
                 const clickable = s.status === 'available';
                 return (
@@ -78,9 +80,9 @@ export function SlotPicker({ slots, selected, onToggle }: Props) {
                       className={`w-full h-10 rounded border ${statusStyle[s.status]} ${
                         sel ? '!border-accent !bg-accent !text-bg font-semibold' : ''
                       }`}
-                      title={statusLabel[s.status]}
+                      title={label(s)}
                     >
-                      {sel ? '✓' : statusGlyph[s.status]}
+                      {sel ? '✓' : glyph(s)}
                     </button>
                   </td>
                 );
@@ -91,8 +93,7 @@ export function SlotPicker({ slots, selected, onToggle }: Props) {
       </table>
       <div className="mt-2 flex gap-3 text-[10px] text-slate-500 px-1">
         <span><span className="text-slate-200">○</span> 예약 가능</span>
-        <span><span className="text-slate-600">×</span> 예약됨</span>
-        <span><span className="opacity-40">▢</span> 선택 불가</span>
+        <span><span className="text-slate-600">×</span> 예약 불가</span>
       </div>
     </div>
   );
