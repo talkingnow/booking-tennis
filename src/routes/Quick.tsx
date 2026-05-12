@@ -8,7 +8,7 @@ import { useFavoritesStore } from '@/stores/favoritesStore';
 import { getDailyBatch } from '@/lib/gytennis/slots';
 import { submitReservation, cancelReservation } from '@/lib/gytennis/reserve';
 import { isSessionValid } from '@/lib/gytennis/auth';
-import { openKcpPayment } from '@/lib/payment/handoff';
+import { openKcpPayment, isMobile } from '@/lib/payment/handoff';
 import { COURTS, courtName } from '@/lib/courts';
 import { SlotGrid } from '@/components/SlotGrid';
 import type { DailyView, Slot, KcpForm } from '@/lib/gytennis/types';
@@ -102,8 +102,10 @@ export default function Quick() {
     if (result.ok && result.kcp) {
       const orderId = result.orderId!;
       payConfirmedRef.current = false;
-      setKcpReady({ orderId, kcp: result.kcp, slotRaw: s.raw });
       setPendingSlots((prev) => new Set([...prev, s.raw]));
+      if (!isMobile()) {
+        setKcpReady({ orderId, kcp: result.kcp, slotRaw: s.raw });
+      }
       openKcpPayment(result.kcp, {
         onWindowClosed: async () => {
           if (!payConfirmedRef.current) {
@@ -256,8 +258,8 @@ export default function Quick() {
         </Card>
       )}
 
-      {/* Payment confirmation card */}
-      {kcpReady && (
+      {/* Payment confirmation card — PC only (mobile uses redirect) */}
+      {kcpReady && !isMobile() && (
         <Card className="border border-green-700">
           <CardTitle>💳 결제 진행 중</CardTitle>
           <p className="text-xs text-slate-400 mb-1">주문번호: {kcpReady.orderId}</p>
