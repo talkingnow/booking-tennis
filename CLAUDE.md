@@ -17,11 +17,23 @@
 - 멀티유저 — 데이터 격리 (각자 폰에만)
 
 **관련 자료:**
-- 입력 요구사항: `_workspace/input_requirements_pwa_2026-05-11.md`
+- 입력 요구사항: `_workspace/00_input_requirements.md`
+- 정찰 결과: `_workspace/01_recon.md`
 - 기존 데스크탑 시스템 정찰 자료: `~/Desktop/BookingTennis/_workspace/01_recon*.md`
+
+**하네스 (Agent Teams 기반):**
+- 스킬: `.claude/skills/booking-tennis-pwa-builder/SKILL.md`
+- 팀원 에이전트: `.claude/agents/{planner,builder,qa}.md`
+- 트리거: "PWA 수정", "슬롯 버그", "예약 위저드 개선", "재배포" 등 booking-tennis 후속 요청 시 자동 활성
+- 흐름: TeamCreate → planner(plan) → builder(code) → qa(verify) → 사용자 보고 → TeamDelete
+- 사용 조건: 본 프로젝트 디렉토리(`~/Desktop/booking-tennis/`)를 CWD 로 Claude Code 실행
 
 **변경 이력:**
 
 | 날짜 | 변경 내용 | 비고 |
 |------|----------|------|
 | 2026-05-11 | 프로젝트 초기 생성 | README/CLAUDE.md/.gitignore + git remote 연결 |
+| 2026-05-12 | M1~M11 PWA 구현 + Vercel prod 배포 | 4 routes + 18 tests, icn1 region |
+| 2026-05-12 | 슬롯 분류 1차 수정 (cno→displayed) | `Slot.internalCourtId` 도입, daily/4 9~12 정상 |
+| 2026-05-12 | 슬롯 분류 2차 반전 (isvkrr=avail/ctooltip=reserved) | 사용자 라이브 대조 결과 분류 가설 반전, UI ○/× 이진 |
+| 2026-05-12 | Agent Teams 하네스 도입 | `.claude/agents/{planner,builder,qa}.md` + `.claude/skills/booking-tennis-pwa-builder/SKILL.md` — 향후 모든 변경은 Plan→Build→Verify 3단계 팀워크 |
