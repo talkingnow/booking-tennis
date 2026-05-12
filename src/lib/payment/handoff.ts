@@ -48,14 +48,14 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=yes">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=yes,maximum-scale=5.0">
 <title>결제 진행 중...</title>
 <style>
-  html{overflow-x:auto;}
-  body{margin:0;padding:16px;background:#0f172a;color:#f1f5f9;font-family:sans-serif;
-       min-height:100vh;overflow-x:auto;box-sizing:border-box;}
+  html,body{margin:0;padding:0;overflow:auto;-webkit-overflow-scrolling:touch;}
+  body{padding:16px;background:#0f172a;color:#f1f5f9;font-family:sans-serif;
+       min-height:100dvh;box-sizing:border-box;}
   .center{display:flex;flex-direction:column;align-items:center;justify-content:center;
-          min-height:100vh;gap:16px;}
+          min-height:100dvh;gap:16px;}
   .msg{font-size:15px;}
   .err{color:#f87171;font-size:13px;margin-top:8px;}
 </style>
@@ -90,7 +90,7 @@ window.addEventListener('load', function () {
   const blobUrl = URL.createObjectURL(blob);
 
   debugLog('info', `KCP blob 생성 action=${action} fields=${Object.keys(kcp.fields).join(',')}`);
-  const popup = window.open(blobUrl, '_blank', 'width=520,height=720,scrollbars=yes,resizable=yes');
+  const popup = window.open(blobUrl, '_blank', 'width=720,height=820,scrollbars=yes,resizable=yes');
   debugLog(popup ? 'info' : 'err', `팝업 open=${!!popup}`);
 
   // Revoke blob URL after the page has had time to load
