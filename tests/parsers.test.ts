@@ -26,13 +26,30 @@ describe('slotParser', () => {
     expect(buckets.blocked).toBe(9);
   });
 
-  it('extracts date/courtId/courtNo/hour from raw value', () => {
+  it('extracts date/courtId/displayed courtNo/hour from header + raw value', () => {
     const slots = parseSlots(html);
     const s = slots.find((x) => x.courtNo === 1 && x.hour === 14);
     expect(s).toBeDefined();
     expect(s!.date).toBe('2026-05-12');
     expect(s!.courtId).toBe(1);
+    expect(s!.internalCourtId).toBe(1);
     expect(s!.raw).toBe('2026-05-12|1|1|14|0');
+  });
+
+  it('uses displayed court number from header (daily_4: 9~12, not internal 13~16)', () => {
+    const html4 = fix('daily_4.html');
+    const slots = parseSlots(html4);
+    const displayedNumbers = Array.from(new Set(slots.map((s) => s.courtNo))).sort((a, b) => a - b);
+    const internals = Array.from(new Set(slots.map((s) => s.internalCourtId))).sort((a, b) => a - b);
+    expect(displayedNumbers).toEqual([9, 10, 11, 12]);
+    expect(internals).toEqual([13, 14, 15, 16]);
+  });
+
+  it('classifies isvkrr-present cells as blocked (not available)', () => {
+    const slots = parseSlots(html);
+    // Daily_1 has 9 blocked total: 2 hard-disabled + 7 isvkrr-soft-blocked
+    const blocked = slots.filter((s) => s.status === 'blocked');
+    expect(blocked.length).toBe(9);
   });
 
   it('returns [] for non-daily HTML', () => {

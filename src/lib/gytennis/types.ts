@@ -5,8 +5,20 @@ export type Slot = {
   date: string;
   /** 1..10 (court complex id, == URL /daily/{courtId}) */
   courtId: number;
-  /** court face number within the complex (1..N) */
+  /**
+   * Court face number AS DISPLAYED on the gytennis website
+   * (e.g. "9 코트" → 9). Parsed from the column header label,
+   * NOT from the yxjorg `value` field which carries a different
+   * site-internal id.
+   */
   courtNo: number;
+  /**
+   * Site-internal court face id from the yxjorg `value` field
+   * (3rd token). Required for submission but not user-visible.
+   * For daily/4 indoor courts the internal id (13-16) differs
+   * from the displayed courtNo (9-12).
+   */
+  internalCourtId: number;
   /** slot start hour (24h, even numbers 6,8,...,20) */
   hour: number;
   /** 0 when DOM `value` flag is 0; actual price comes from rsvConfirm form payload */
