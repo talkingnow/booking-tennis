@@ -41,3 +41,5 @@
 | 2026-05-12 | 검수 후 M-A~M-G 수정 (defaultDate 버그, PaymentCountdown, pending 슬롯, SW prompt, timeSync, authStore 강건화) | 02_plan_inspection.md |
 | 2026-05-12 | 즉시 예약 즐겨찾기 관리 패널 + blank screen 버그(useEffect 무한루프) 수정 | Quick.tsx hydrate deps [] 고정 |
 | 2026-05-12 | M1~M4: 결제팝업 스크롤, 팝업닫힘 자동취소(payConfirmedRef), Race normal모드 제거, SlotGrid 시각화 | 02_plan_improve4.md |
+| 2026-05-12 | fix(auth): doLogin() 중복 호출 가드 (busy 체크) — 로그인 튕김 방지 | authStore.ts |
+| 2026-05-12 | KCP 결제창 모바일 리다이렉트(방안 A) — isMobile() 분기, m_redirect_url, /payment-result 콜백 라우트 신규 | 02_plan_kcp_mobile.md |
