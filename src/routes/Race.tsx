@@ -480,7 +480,12 @@ export default function Race() {
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">코트장</label>
                     <select value={newCourtId}
-                      onChange={(e) => { setNewCourtId(Number(e.target.value)); setNewCourtNo(1); }}
+                      onChange={(e) => {
+                      const id = Number(e.target.value);
+                      setNewCourtId(id);
+                      // Reset to the first valid display label for this facility
+                      setNewCourtNo(getCourt(id)?.courtNos[0] ?? 1);
+                    }}
                       className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs"
                     >
                       {COURTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
