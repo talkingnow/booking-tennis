@@ -136,7 +136,10 @@ export default function Race() {
   const prioritiesRef      = useRef(priorities);
   const cascadeIdxRef      = useRef(0);
   const cascadeResultsRef  = useRef<CascadeResult[]>([]);
+  const payConfirmedRef    = useRef(false);
+  const kcpReadyRef        = useRef(kcpReady);
   useEffect(() => { fireModeRef.current = fireMode; },    [fireMode]);
+  useEffect(() => { kcpReadyRef.current = kcpReady; },   [kcpReady]);
   useEffect(() => { prioritiesRef.current = priorities; savePriorities(priorities); }, [priorities]);
 
   useEffect(() => { hydrate(); }, [hydrate]);
@@ -310,6 +313,24 @@ export default function Race() {
     setKcpReady(null);
     setDeadline(null);
     await fire();
+  };
+
+  /** Open KCP popup with payConfirmedRef-based cancel-on-close logic. */
+  const openPaymentPopup = () => {
+    const current = kcpReadyRef.current;
+    if (!current) return;
+    payConfirmedRef.current = false;
+    openKcpPayment(current.kcp, {
+      onWindowClosed: async () => {
+        if (!payConfirmedRef.current) {
+          const c = useAuthStore.getState().cookie;
+          if (c && kcpReadyRef.current) {
+            await cancelReservation(kcpReadyRef.current.orderId, c);
+          }
+          await tryNext();
+        }
+      },
+    });
   };
 
   /** Timer expired → cancel current slot, try next (open-day) or fail (normal). */
@@ -620,26 +641,26 @@ export default function Race() {
             <p className="text-sm text-slate-300 mb-2">주문번호: {kcpReady.orderId}</p>
           )}
           <p className="text-xs text-slate-500 mb-4">8분 이내에 결제를 완료해야 슬롯이 확정됩니다.</p>
-          {windowClosed && (
-            <p className="text-xs text-yellow-400 mb-3">
-              결제창이 닫혔습니다.
-            </p>
-          )}
           <div className="space-y-2">
             <Button
-              onClick={() => openKcpPayment(kcpReady.kcp, { onWindowClosed: () => setWindowClosed(true) })}
+              onClick={openPaymentPopup}
               className="w-full"
             >
               결제창 열기 →
             </Button>
+            {windowClosed && (
+              <p className="text-xs text-yellow-400">
+                결제창이 닫혔습니다. 결제창 열기를 다시 눌러 재시도하거나, 결제 완료 ✓를 누르세요.
+              </p>
+            )}
             {fireMode === 'open-day' && cascadeIdx < priorities.length && (
-              <Button variant="secondary" onClick={tryNext} className="w-full">
-                결제 완료, {cascadeIdx + 1}순위 시도 →
+              <Button variant="secondary" onClick={() => { payConfirmedRef.current = true; tryNext(); }} className="w-full">
+                결제 완료 ✓ — {cascadeIdx + 1}순위 시도
               </Button>
             )}
             {fireMode === 'open-day' && cascadeIdx >= priorities.length && (
-              <Button variant="secondary" onClick={tryNext} className="w-full">
-                모든 우선순위 완료 — 결과 확인
+              <Button variant="secondary" onClick={() => { payConfirmedRef.current = true; tryNext(); }} className="w-full">
+                결제 완료 ✓ — 모든 우선순위 확인
               </Button>
             )}
           </div>
