@@ -43,6 +43,13 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    proxy: {
+      '/api': {
+        target: 'https://booking-tennis-talkingnow.vercel.app',
+        changeOrigin: true,
+        secure: true,
+      },
+    },
   },
   test: {
     globals: true,
