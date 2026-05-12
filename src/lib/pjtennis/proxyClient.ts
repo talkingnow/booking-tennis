@@ -70,13 +70,10 @@ export async function pjFetch(path: string, init: ProxyRequestInit = {}): Promis
 
 /**
  * Extract the pjtennis session cookie value from a Set-Cookie line.
- * M0 TODO: R2 — actual cookie name is unknown until live login.
- * Defensive regex tries common patterns: pjssn, pjtssn, PHPSESSID, JSESSIONID.
+ * R2 확정 (M0 curl 2026-05-12): 세션 쿠키 이름 = pjtssn (gytennis: gytssn)
  */
 export function extractPjSession(setCookies: string[]): string | null {
-  // TODO(M0/R2): Replace with confirmed cookie name from live pjtennis login.
-  // Candidates based on gytennis pattern: pjssn, pjtssn, PHPSESSID, JSESSIONID
-  const re = /(?:^|;\s*)((?:pjssn|pjtssn|PHPSESSID|JSESSIONID)=[^;]+)/i;
+  const re = /(?:^|;\s*)(pjtssn=[^;]+)/i;
   for (const sc of setCookies) {
     const m = sc.match(re);
     if (m) return m[1];
