@@ -37,3 +37,4 @@
 | 2026-05-12 | 슬롯 분류 1차 수정 (cno→displayed) | `Slot.internalCourtId` 도입, daily/4 9~12 정상 |
 | 2026-05-12 | 슬롯 분류 2차 반전 (isvkrr=avail/ctooltip=reserved) | 사용자 라이브 대조 결과 분류 가설 반전, UI ○/× 이진 |
 | 2026-05-12 | Agent Teams 하네스 도입 | `.claude/agents/{planner,builder,qa}.md` + `.claude/skills/booking-tennis-pwa-builder/SKILL.md` — 향후 모든 변경은 Plan→Build→Verify 3단계 팀워크 |
+| 2026-05-12 | 예약 버그 2종 수정 | (1) isvkrr[] 전송 값 수정 — yxjorg(가격=0) → isvkrrRaw(실제가격) / (2) Quick.tsx auto-login effect 추가 |
