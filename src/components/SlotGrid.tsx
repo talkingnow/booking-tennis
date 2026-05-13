@@ -10,8 +10,10 @@
  *   pending    — yellow ⏳ (processing payment)
  *   blocked    — gray  – (site-disabled)
  */
+import { useMemo } from 'react';
 import type { Slot, SlotStatus } from '@/lib/gytennis/types';
 import { getCourt } from '@/lib/courts';
+import { isRegistered, getSite } from '@/lib/sites/registry';
 import type { SiteId } from '@/lib/sites/types';
 
 export type SlotGridProps = {
@@ -25,9 +27,9 @@ export type SlotGridProps = {
   onSlotClick?: (slot: Slot) => void;
   /** Currently loading (shows skeleton). */
   loading?: boolean;
+  /** Explicit hour rows. Defaults to site policy.hours range, or slots distinct. */
+  hours?: number[];
 };
-
-const SLOT_HOURS = [6, 8, 10, 12, 14, 16, 18, 20];
 
 function effectiveStatus(slot: Slot, pendingSlots: Set<string>): SlotStatus {
   if (pendingSlots.has(slot.raw)) return 'pending';
@@ -54,7 +56,19 @@ function cellLabel(status: SlotStatus): string {
   }
 }
 
-export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set(), onSlotClick, loading }: SlotGridProps) {
+export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set(), onSlotClick, loading, hours }: SlotGridProps) {
+  // Dynamic hour rows: explicit prop > site policy > distinct from slots
+  const slotHours = useMemo(() => {
+    if (hours?.length) return hours;
+    if (isRegistered(siteId)) {
+      const [s, e] = getSite(siteId).config.policy.hours;
+      const out: number[] = [];
+      for (let h = s; h < e; h++) out.push(h);
+      return out;
+    }
+    return Array.from(new Set(slots.map((x) => x.hour))).sort((a, b) => a - b);
+  }, [hours, siteId, slots]);
+
   // Determine column court numbers
   const metaCourtNos = getCourt(siteId, courtId)?.courtNos;
   const courtNos = metaCourtNos?.length
@@ -89,7 +103,7 @@ export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set
           </tr>
         </thead>
         <tbody>
-          {SLOT_HOURS.map((hour) => (
+          {slotHours.map((hour) => (
             <tr key={hour}>
               <td className="text-slate-500 text-right pr-2 font-mono">
                 {String(hour).padStart(2, '0')}
