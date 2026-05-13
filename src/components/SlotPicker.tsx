@@ -1,12 +1,17 @@
+import { useMemo } from 'react';
 import type { Slot } from '@/lib/gytennis/types';
+import { isRegistered, getSite } from '@/lib/sites/registry';
+import type { SiteId } from '@/lib/sites/types';
 
 type Props = {
   slots: Slot[];
   selected: Slot[];
   onToggle: (slot: Slot) => void;
+  /** Site identifier — used to derive hour rows from policy. Defaults to 'gy'. */
+  siteId?: SiteId;
+  /** Explicit hour rows. Overrides site policy derivation. */
+  hours?: number[];
 };
-
-const hourBuckets = [6, 8, 10, 12, 14, 16, 18, 20];
 
 const statusStyle: Record<Slot['status'], string> = {
   available: 'bg-slate-800 border-slate-600 hover:border-accent cursor-pointer text-slate-200',
@@ -37,7 +42,24 @@ function label(s: Slot): string {
  *   columns = court face number (1코트, 2코트, ...)
  *   rows    = 2-hour time buckets (06~08, 08~10, ...)
  */
-export function SlotPicker({ slots, selected, onToggle }: Props) {
+export function SlotPicker({ slots, selected, onToggle, siteId = 'gy', hours }: Props) {
+  const hourBuckets = useMemo(() => {
+    if (hours?.length) return hours;
+    if (isRegistered(siteId)) {
+      const [s, e] = getSite(siteId).config.policy.hours;
+      const out: number[] = [];
+      for (let h = s; h < e; h++) out.push(h);
+      return out;
+    }
+    return Array.from(new Set(slots.map((x) => x.hour))).sort((a, b) => a - b);
+  }, [hours, siteId, slots]);
+
+  // Slot duration per site: PJ=1h, GY=1h (both 1-hour steps in policy)
+  const slotDuration = useMemo(() => {
+    if (hourBuckets.length < 2) return 1;
+    return hourBuckets[1] - hourBuckets[0];
+  }, [hourBuckets]);
+
   const courtNos = Array.from(new Set(slots.map((s) => s.courtNo))).sort((a, b) => a - b);
   const isSelected = (s: Slot) => selected.some((x) => x.raw === s.raw);
 
@@ -60,7 +82,7 @@ export function SlotPicker({ slots, selected, onToggle }: Props) {
           {hourBuckets.map((h) => (
             <tr key={h}>
               <td className="px-1 py-1 text-slate-400 text-[10px] whitespace-nowrap">
-                {String(h).padStart(2, '0')}~{String(h + 2).padStart(2, '0')}
+                {String(h).padStart(2, '0')}~{String(h + slotDuration).padStart(2, '0')}
               </td>
               {courtNos.map((no) => {
                 const s = slots.find((x) => x.courtNo === no && x.hour === h);
