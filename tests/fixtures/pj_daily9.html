@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>파주시테니스협회</title></head>
+<body>
+<!-- Minimal PJ daily/9 fixture — verified DOM from 2026-05-13 QA capture -->
+<!-- gtitle carries courtId=9 (data-grp) and sot/soc limits -->
+<div class="gtitle" data-sot="2" data-grp="9" data-soc="1">월롱체육공원코트 예약현황</div>
+<div class="subSubj">2026-05-13 월롱체육공원코트</div>
+<!-- PJ wholeTable: data-srv="edhtqe" identifies the PJ scheme -->
+<table class="wholeTable" data-srv="edhtqe" data-ssb="rsvConfirm" data-sct="">
+  <tr>
+    <!-- Column 0: time labels (skipped by parser, i=0) -->
+    <td>
+      <table class="custom">
+        <tr><td class="diagonal-line right"><div class="left">코트</div><span class="right">시간</span></td></tr>
+        <tr><td class="wide">07<span class="courtTime">:00</span> ~ 08<span class="courtTime">:00</span></td></tr>
+        <tr><td class="wide">08<span class="courtTime">:00</span> ~ 09<span class="courtTime">:00</span></td></tr>
+        <tr><td class="wide">09<span class="courtTime">:00</span> ~ 10<span class="courtTime">:00</span></td></tr>
+        <tr><td class="wide">10<span class="courtTime">:00</span> ~ 11<span class="courtTime">:00</span></td></tr>
+      </table>
+    </td>
+    <!-- Column 1: Court 1 -->
+    <td>
+      <table class="innerCustom innerTop">
+        <tr>
+          <td class="courtTag">1 <span class="flexCourt">코트</span></td>
+        </tr>
+        <!-- blocked: rjelnu disabled + title="예약불가" -->
+        <tr>
+          <td class="resTag">
+            <input type="checkbox" name="rjelnu[]" class="rjelnu" value="2026-05-13|9|35|7|3000" title="예약불가" disabled />
+            <input type="checkbox" name="edhtqe[]" class="fzgogr" value="2026-05-13|9|35|7|3000" title="예약불가" disabled />
+          </td>
+        </tr>
+        <!-- reserved: rjelnu active + fa-user-clock icon + td title="예약됨" -->
+        <tr>
+          <td title="예약됨" class="resTag">
+            <input type="checkbox" name="rjelnu[]" class="rjelnu" value="2026-05-13|9|35|8|3000" onClick="utils.checkboxSelect();" />
+            <i class="fa-solid fa-user-clock"></i>
+          </td>
+        </tr>
+        <!-- available: rjelnu active + edhtqe active, no icon -->
+        <tr>
+          <td class="resTag">
+            <input type="checkbox" name="rjelnu[]" class="rjelnu" value="2026-05-13|9|35|9|3000" onClick="utils.checkboxSelect();" />
+            <input type="checkbox" name="edhtqe[]" class="fzgogr" value="2026-05-13|9|35|9|3000" onClick="utils.checkboxSelect();" />
+          </td>
+        </tr>
+        <!-- reserved: via td title only (no icon, alternative marker) -->
+        <tr>
+          <td title="예약됨" class="resTag">
+            <input type="checkbox" name="rjelnu[]" class="rjelnu" value="2026-05-13|9|35|10|5000" onClick="utils.checkboxSelect();" />
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+<!-- hidden form fields used by metaParser -->
+<form action="/rsvConfirm" method="post">
+  <input type="hidden" name="cvalue" value="9" />
+  <input type="hidden" name="cdate" value="2026-05-13" />
+  <input type="hidden" name="van_code" value="" />
+</form>
+</body>
+</html>

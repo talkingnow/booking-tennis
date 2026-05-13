@@ -1,30 +1,36 @@
 import type { Slot, SlotStatus } from '../gytennis/types';
 
+// GY uses yxjorg[]/isvkrr[]/.ctooltip-trigger
+// PJ uses rjelnu[]/edhtqe[]/i.fa-user-clock + td[title="예약됨"]
+// The primary input name is auto-detected from the wholeTable data-srv attribute
+// or by probing the first resTag cell.
+
+type SiteScheme = 'gy' | 'pj';
+
+function detectScheme(wholeTable: HTMLElement): SiteScheme {
+  // PJ sets data-srv="edhtqe" on the wholeTable element
+  const srv = wholeTable.getAttribute('data-srv');
+  if (srv === 'edhtqe') return 'pj';
+  // Fallback: probe the first primary input name
+  const firstInput = wholeTable.querySelector<HTMLInputElement>('input[name="rjelnu[]"]');
+  if (firstInput) return 'pj';
+  return 'gy';
+}
+
 /**
  * Parse the slot grid out of a /daily/{courtId} HTML page.
  *
- * Layout (single <table class="wholeTable">):
- *   <tr>
- *     <td>  [time labels: 06:00~08:00, ..., 20:00~22:00]
- *     <td>  ["1 코트" header] + 8 td.resTag cells
- *     ...
- *
- * Cell classification (verified against live gytennis site, 2026-05-12):
- *   - yxjorg has `disabled`                  → blocked (truly unavailable)
- *   - has `<div class="ctooltip-trigger">`   → reserved (someone has it; the
- *     (with fa-user-clock icon, regardless    user-clock icon is the visual
- *      of data-ctooltip="0|" or "1|")         hint shown on the site)
- *   - has `<input name="isvkrr[]">` sibling  → available (pickable, no icon
- *     (without `disabled`)                    rendered on the site)
- *   - otherwise                              → blocked (defensive)
- *
- * The displayed court number comes from the column header text (e.g. "9 코트"),
- * NOT from the yxjorg `value` 3rd token (a site-internal id).
+ * Supports two site schemes (auto-detected from wholeTable):
+ *   GY (gytennis): primary=yxjorg[], price=isvkrr[], reserved=.ctooltip-trigger
+ *   PJ (pjtennis): primary=rjelnu[], price=edhtqe[], reserved=i.fa-solid.fa-user-clock
+ *                  or td[title="예약됨"]
  */
 export function parseSlots(html: string): Slot[] {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const wholeTable = doc.querySelector<HTMLElement>('table.wholeTable');
   if (!wholeTable) return [];
+
+  const scheme = detectScheme(wholeTable);
 
   const topRow = wholeTable.querySelector<HTMLTableRowElement>(':scope > tbody > tr, :scope > tr');
   if (!topRow) return [];
@@ -40,7 +46,7 @@ export function parseSlots(html: string): Slot[] {
 
     const cells = col.querySelectorAll<HTMLElement>('td.resTag');
     cells.forEach((cell) => {
-      const slot = parseCell(cell, displayedCourtNo);
+      const slot = parseCell(cell, displayedCourtNo, scheme);
       if (slot) out.push(slot);
     });
   }
@@ -57,10 +63,13 @@ function parseDisplayedCourtNo(columnTd: HTMLElement): number | null {
   return m2 ? Number(m2[1]) : null;
 }
 
-function parseCell(cell: HTMLElement, displayedCourtNo: number): Slot | null {
-  const yxjorg = cell.querySelector<HTMLInputElement>('input[name="yxjorg[]"]');
-  if (!yxjorg) return null;
-  const raw = yxjorg.getAttribute('value') ?? '';
+function parseCell(cell: HTMLElement, displayedCourtNo: number, scheme: SiteScheme): Slot | null {
+  const primaryName = scheme === 'pj' ? 'rjelnu[]' : 'yxjorg[]';
+  const priceName = scheme === 'pj' ? 'edhtqe[]' : 'isvkrr[]';
+
+  const primaryInput = cell.querySelector<HTMLInputElement>(`input[name="${primaryName}"]`);
+  if (!primaryInput) return null;
+  const raw = primaryInput.getAttribute('value') ?? '';
   const parts = raw.split('|');
   if (parts.length < 5) return null;
   const date = parts[0];
@@ -72,12 +81,10 @@ function parseCell(cell: HTMLElement, displayedCourtNo: number): Slot | null {
     return null;
   }
 
-  const status = classifyCell(cell, yxjorg);
+  const status = classifyCell(cell, primaryInput, priceName, scheme);
 
-  // Read the isvkrr[] value (present only in available cells; differs from yxjorg
-  // in the last token which carries the actual price instead of 0).
-  const isvkrrInput = cell.querySelector<HTMLInputElement>('input[name="isvkrr[]"]');
-  const isvkrrRaw = isvkrrInput?.getAttribute('value') ?? '';
+  const priceInput = cell.querySelector<HTMLInputElement>(`input[name="${priceName}"]`);
+  const isvkrrRaw = priceInput?.getAttribute('value') ?? '';
 
   return {
     date,
@@ -92,21 +99,28 @@ function parseCell(cell: HTMLElement, displayedCourtNo: number): Slot | null {
   };
 }
 
-function classifyCell(cell: HTMLElement, yxjorg: HTMLInputElement): SlotStatus {
-  // Hard-blocked (예약불가): yxjorg explicitly disabled.
-  if (yxjorg.hasAttribute('disabled')) return 'blocked';
+function classifyCell(
+  cell: HTMLElement,
+  primaryInput: HTMLInputElement,
+  priceName: string,
+  scheme: SiteScheme,
+): SlotStatus {
+  // Blocked: primary input is disabled (예약불가 on both GY and PJ)
+  if (primaryInput.hasAttribute('disabled')) return 'blocked';
 
-  // Reserved: ctooltip-trigger element is present. The site renders the
-  // fa-user-clock icon and shows reservation info on hover. Both
-  // data-ctooltip="0|..." and "1|..." map here — the leading digit
-  // distinguishes pending vs paid, not availability.
-  const tip = cell.querySelector<HTMLElement>('.ctooltip-trigger');
-  if (tip) return 'reserved';
+  if (scheme === 'pj') {
+    // PJ reserved: fa-user-clock icon present or parent td has title="예약됨"
+    const hasUserClock = cell.querySelector('i.fa-user-clock, i.fa-solid.fa-user-clock');
+    if (hasUserClock) return 'reserved';
+    if (cell.getAttribute('title') === '예약됨') return 'reserved';
+  } else {
+    // GY reserved: ctooltip-trigger div present
+    if (cell.querySelector('.ctooltip-trigger')) return 'reserved';
+  }
 
-  // Available: a non-disabled isvkrr input is the site's "pickable" marker.
-  // The cell renders empty (no icon) on the site, signaling free pickup.
-  const isvkrr = cell.querySelector<HTMLInputElement>('input[name="isvkrr[]"]');
-  if (isvkrr && !isvkrr.hasAttribute('disabled')) return 'available';
+  // Available: price input present and not disabled
+  const priceInput = cell.querySelector<HTMLInputElement>(`input[name="${priceName}"]`);
+  if (priceInput && !priceInput.hasAttribute('disabled')) return 'available';
 
   return 'blocked';
 }

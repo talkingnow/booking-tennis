@@ -102,14 +102,14 @@ describe('courts', () => {
     expect(courtName('pj', 1)).toBe('광탄');
   });
 
-  it('courtName("pj", 12) returns 금촌', () => {
-    expect(courtName('pj', 12)).toBe('금촌');
+  it('courtName("pj", 12) returns 공설(파주스타디움) (corrected 2026-05-13)', () => {
+    expect(courtName('pj', 12)).toBe('공설(파주스타디움)');
   });
 
-  it('getCourt("pj", 2) has 5 courtNos (운정1)', () => {
+  it('getCourt("pj", 2) is 하지석동 (corrected 2026-05-13; was 운정1(가온A))', () => {
     const court = getCourt('pj', 2);
     expect(court).toBeDefined();
-    expect(court!.name).toBe('운정1(가온A)');
+    expect(court!.name).toBe('하지석동');
     expect(court!.courtNos).toHaveLength(5);
   });
 

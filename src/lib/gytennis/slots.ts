@@ -26,7 +26,7 @@ export async function getDaily(
 
 /**
  * Fetch daily views for several courts in parallel.
- * Failed fetches are returned as null entries in the result map.
+ * Uses allSettled so one 502 court doesn't suppress results from others.
  */
 export async function getDailyBatch(
   courtIds: number[],
@@ -34,7 +34,10 @@ export async function getDailyBatch(
   date?: string,
 ): Promise<Map<number, DailyView | null>> {
   const out = new Map<number, DailyView | null>();
-  const results = await Promise.all(courtIds.map((id) => getDaily(id, cookie, date).catch(() => null)));
-  courtIds.forEach((id, i) => out.set(id, results[i]));
+  const results = await Promise.allSettled(courtIds.map((id) => getDaily(id, cookie, date)));
+  courtIds.forEach((id, i) => {
+    const r = results[i];
+    out.set(id, r.status === 'fulfilled' ? r.value : null);
+  });
   return out;
 }

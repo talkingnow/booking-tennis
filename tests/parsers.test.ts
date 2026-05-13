@@ -112,6 +112,64 @@ describe('metaParser — daily_4 (indoor)', () => {
   });
 });
 
+describe('slotParser — PJ scheme (pj_daily9.html)', () => {
+  const html = fix('pj_daily9.html');
+
+  it('detects PJ scheme and returns non-empty slots', () => {
+    const slots = parseSlots(html);
+    expect(slots.length).toBeGreaterThan(0);
+  });
+
+  it('classifies blocked cell (rjelnu disabled)', () => {
+    const slots = parseSlots(html);
+    const blocked = slots.filter((s) => s.status === 'blocked');
+    expect(blocked.length).toBeGreaterThanOrEqual(1);
+    expect(blocked[0].hour).toBe(7);
+  });
+
+  it('classifies reserved cell (fa-user-clock icon)', () => {
+    const slots = parseSlots(html);
+    const reserved = slots.filter((s) => s.status === 'reserved');
+    expect(reserved.length).toBeGreaterThanOrEqual(2);
+    const hours = reserved.map((s) => s.hour);
+    expect(hours).toContain(8);
+  });
+
+  it('classifies available cell (edhtqe present, no icon)', () => {
+    const slots = parseSlots(html);
+    const available = slots.filter((s) => s.status === 'available');
+    expect(available.length).toBeGreaterThanOrEqual(1);
+    expect(available[0].hour).toBe(9);
+    expect(available[0].isvkrrRaw).toContain('9|35|9|3000');
+  });
+
+  it('extracts correct courtId=9 and courtNo=1 from PJ fixture', () => {
+    const slots = parseSlots(html);
+    expect(slots.every((s) => s.courtId === 9)).toBe(true);
+    expect(slots.every((s) => s.courtNo === 1)).toBe(true);
+  });
+});
+
+describe('COURTS_PJ mapping', () => {
+  it('maps id=9 to 월롱 (was 통일 before fix)', async () => {
+    const { COURTS_PJ } = await import('../src/lib/courts');
+    const c = COURTS_PJ.find((x) => x.id === 9);
+    expect(c?.name).toBe('월롱');
+  });
+
+  it('maps id=2 to 하지석동 (was 운정1(가온A) before fix)', async () => {
+    const { COURTS_PJ } = await import('../src/lib/courts');
+    const c = COURTS_PJ.find((x) => x.id === 2);
+    expect(c?.name).toBe('하지석동');
+  });
+
+  it('maps id=12 to 공설(파주스타디움) (was 금촌 before fix)', async () => {
+    const { COURTS_PJ } = await import('../src/lib/courts');
+    const c = COURTS_PJ.find((x) => x.id === 12);
+    expect(c?.name).toBe('공설(파주스타디움)');
+  });
+});
+
 describe('kcpParser', () => {
   it('returns null for non-payment HTML', () => {
     expect(parseKcpForm('<html><body><p>nope</p></body></html>')).toBeNull();

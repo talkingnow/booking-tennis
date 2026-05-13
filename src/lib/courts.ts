@@ -37,20 +37,21 @@ export const COURTS_GY: CourtName[] = [
 // Verified live 2026-05-12 via daily/1..12 page scraping.
 // 합계: 55 court faces.
 // ──────────────────────────────────────────────────────────────────────────────
+// Verified live 2026-05-13 via agent-browser /daily/{1..12} gtitle capture.
+// Previous mapping had 8 of 12 entries wrong (id 2,3,6,7,9,10,11,12).
 export const COURTS_PJ: CourtName[] = [
-  { id: 1,  name: '광탄',          kind: 'outdoor', courtNos: [1,2,3]             },
-  { id: 2,  name: '운정1(가온A)',  kind: 'outdoor', courtNos: [1,2,3,4,5]         },
-  { id: 3,  name: '운정2(가온B)',  kind: 'outdoor', courtNos: [1,2,3,4]           },
-  { id: 4,  name: '법원',          kind: 'outdoor', courtNos: [1,2,3,4]           },
-  { id: 5,  name: '연풍리',        kind: 'outdoor', courtNos: [1,2,3]             },
-  { id: 6,  name: '적성',          kind: 'outdoor', courtNos: [1,2,3,4]           },
-  { id: 7,  name: '월롱',          kind: 'outdoor', courtNos: [1,2,3]             },
-  { id: 8,  name: '상지석동',      kind: 'outdoor', courtNos: [1,2,3]             },
-  { id: 9,  name: '통일',          kind: 'outdoor', courtNos: [1,2,3,4,5,6]       },
-  { id: 10, name: '파주스타디움',  kind: 'outdoor', courtNos: [1,2,3,4,5,6]       },
-  { id: 11, name: '하지석동',      kind: 'outdoor', courtNos: [1,2,3,4,5,6]       },
-  // 금촌: 1-4 outdoor + 5-8 indoor (mixed). Treated as outdoor for now.
-  { id: 12, name: '금촌',          kind: 'outdoor', courtNos: [1,2,3,4,5,6,7,8]  },
+  { id: 1,  name: '광탄',            kind: 'outdoor', courtNos: [1,2,3]             },
+  { id: 2,  name: '하지석동',        kind: 'outdoor', courtNos: [1,2,3,4,5]         },
+  { id: 3,  name: '금촌',            kind: 'outdoor', courtNos: [1,2,3,4]           },
+  { id: 4,  name: '법원',            kind: 'outdoor', courtNos: [1,2,3,4]           },
+  { id: 5,  name: '연풍리',          kind: 'outdoor', courtNos: [1,2,3]             },
+  { id: 6,  name: '운정1(가온A)',    kind: 'outdoor', courtNos: [1,2,3,4]           },
+  { id: 7,  name: '운정2(가온B)',    kind: 'outdoor', courtNos: [1,2,3]             },
+  { id: 8,  name: '상지석동',        kind: 'outdoor', courtNos: [1,2,3]             },
+  { id: 9,  name: '월롱',            kind: 'outdoor', courtNos: [1,2,3,4,5,6]       },
+  { id: 10, name: '적성',            kind: 'outdoor', courtNos: [1,2,3,4,5,6]       },
+  { id: 11, name: '통일',            kind: 'outdoor', courtNos: [1,2,3,4,5,6]       },
+  { id: 12, name: '공설(파주스타디움)', kind: 'outdoor', courtNos: [1,2,3,4,5,6,7,8] },
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────

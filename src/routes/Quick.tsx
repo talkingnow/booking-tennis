@@ -31,6 +31,8 @@ export default function Quick() {
   const [favOpen, setFavOpen] = useState(false);
   const [kcpReady, setKcpReady] = useState<{ orderId: string; kcp: KcpForm; slotRaw: string } | null>(null);
   const payConfirmedRef = useRef(false);
+  // Tracks which courtIds returned null after a completed fetch (not still loading)
+  const [failedCourts, setFailedCourts] = useState<Set<number>>(new Set());
 
   // Hydrate stores once
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -49,6 +51,7 @@ export default function Quick() {
     setError(null);
     setPendingSlots(new Set());
     setKcpReady(null);
+    setFailedCourts(new Set());
   }, [activeSiteId]);
 
   // Open favorites panel when no favorites for this site
@@ -92,7 +95,20 @@ export default function Quick() {
 
     const map = await adapter.getDailyBatch(courtIds, activeCookie, date);
     setData(map);
+    const failed = new Set<number>();
+    courtIds.forEach((id) => { if (map.get(id) === null) failed.add(id); });
+    setFailedCourts(failed);
     setLoading(false);
+  };
+
+  const retryCourt = async (courtId: number) => {
+    if (!adapter) return;
+    const activeCookie = useAuthStore.getState().cookies[activeSiteId];
+    if (!activeCookie) return;
+    setFailedCourts((prev) => { const n = new Set(prev); n.delete(courtId); return n; });
+    const view = await adapter.getDaily(courtId, activeCookie, date).catch(() => null);
+    setData((prev) => new Map(prev).set(courtId, view));
+    if (view === null) setFailedCourts((prev) => new Set([...prev, courtId]));
   };
 
   const reserve = async (s: Slot) => {
@@ -333,6 +349,7 @@ export default function Quick() {
       {/* Slot grid cards */}
       {courtIds.map((id) => {
         const view = data.get(id);
+        const isFailed = failedCourts.has(id);
         return (
           <Card key={id}>
             <div className="flex items-center justify-between mb-2">
@@ -342,7 +359,22 @@ export default function Quick() {
               )}
             </div>
             {!view ? (
-              <p className="text-xs text-slate-500">{loading ? '조회 중…' : '데이터 없음'}</p>
+              isFailed ? (
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-red-500 flex-1">조회 실패 — 서버 연결 불안정</p>
+                  <Button
+                    variant="secondary"
+                    className="text-xs px-2 py-1"
+                    onClick={() => retryCourt(id)}
+                  >
+                    재시도
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">{loading ? '조회 중…' : '데이터 없음'}</p>
+              )
+            ) : view.slots.length === 0 ? (
+              <p className="text-xs text-amber-600">슬롯 없음 — 비영업일이거나 파싱 오류 가능성</p>
             ) : (
               <SlotGrid
                 courtId={id}
