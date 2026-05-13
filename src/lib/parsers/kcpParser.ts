@@ -9,6 +9,7 @@ export function parseKcpForm(html: string): KcpForm | null {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const forms = Array.from(doc.querySelectorAll<HTMLFormElement>('form'));
   const form =
+    forms.find((f) => /\.kcp\.co\.kr/i.test(f.getAttribute('action') ?? '')) ??
     forms.find((f) => /kcp/i.test(f.getAttribute('action') ?? '')) ??
     forms.find((f) => f.querySelector('input[name="ordr_idxx"]'));
   if (!form) return null;
