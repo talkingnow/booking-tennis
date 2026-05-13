@@ -25,6 +25,7 @@ export const pjAdapter: SiteAdapter = {
   courts: COURTS_PJ,
   login: pjAuth.login,
   isSessionValid: pjAuth.isSessionValid,
+  checkSession: pjAuth.checkSession,
   logout: pjAuth.logout,
   getDaily: pjSlots.getDaily,
   getDailyBatch: pjSlots.getDailyBatch,

@@ -24,6 +24,7 @@ export const gyAdapter: SiteAdapter = {
   courts: COURTS_GY,
   login: gyAuth.login,
   isSessionValid: gyAuth.isSessionValid,
+  checkSession: gyAuth.checkSession,
   logout: gyAuth.logout,
   getDaily: gySlots.getDaily,
   getDailyBatch: gySlots.getDailyBatch,

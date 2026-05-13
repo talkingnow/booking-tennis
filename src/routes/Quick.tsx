@@ -73,9 +73,14 @@ export default function Quick() {
     setLoading(true);
     setError(null);
 
-    const valid = await adapter.isSessionValid(currentCookie);
+    const sessionStatus = await adapter.checkSession(currentCookie);
     let activeCookie = currentCookie;
-    if (!valid && account) {
+    if (sessionStatus === 'unknown') {
+      setError('서버 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.');
+      setLoading(false);
+      return;
+    }
+    if (sessionStatus === 'expired' && account) {
       const ok = await doLogin(activeSiteId);
       if (!ok) {
         setError('세션 만료. 계정 설정에서 다시 로그인해 주세요.');

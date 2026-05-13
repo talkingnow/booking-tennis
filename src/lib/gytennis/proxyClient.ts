@@ -14,6 +14,8 @@ export type ProxyResponse = {
   location: string | null;
   setCookies: string[];
   headers: Headers;
+  /** True when the Edge proxy returned 502 with error=upstream_unreachable */
+  upstreamError: boolean;
   text: () => Promise<string>;
   bytes: () => Promise<ArrayBuffer>;
 };
@@ -58,11 +60,16 @@ export async function gyFetch(path: string, init: ProxyRequestInit = {}): Promis
     return cached;
   };
 
+  // Detect 502 upstream_unreachable from the Edge proxy
+  const resolvedStatus = statusHdr ? Number(statusHdr) : res.status;
+  const upstreamError = res.status === 502 && !statusHdr;
+
   return {
-    status: statusHdr ? Number(statusHdr) : res.status,
+    status: resolvedStatus,
     location: locationHdr,
     setCookies: setCookieHdr ? setCookieHdr.split('\n').filter(Boolean) : [],
     headers: res.headers,
+    upstreamError,
     text: async () => new TextDecoder('utf-8').decode(await bytes()),
     bytes,
   };

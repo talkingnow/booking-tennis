@@ -89,6 +89,13 @@ export default async function handler(req: Request): Promise<Response> {
     body = await req.arrayBuffer();
   }
 
+  function isTransientError(e: unknown): boolean {
+    const msg = String(e).toLowerCase();
+    return msg.includes('timeout') || msg.includes('enotfound') ||
+      msg.includes('econnreset') || msg.includes('socket hang up') ||
+      msg.includes('network') || msg.includes('abort');
+  }
+
   let upstreamRes: Response;
   try {
     upstreamRes = await fetch(upstream, {
@@ -96,12 +103,40 @@ export default async function handler(req: Request): Promise<Response> {
       headers: fwd,
       body,
       redirect: 'manual',
+      signal: AbortSignal.timeout(8000),
     });
   } catch (e) {
-    return new Response(
-      JSON.stringify({ error: 'upstream_unreachable', message: String(e) }),
-      { status: 502, headers: { 'content-type': 'application/json' } },
-    );
+    if (!isTransientError(e)) {
+      return new Response(
+        JSON.stringify({
+          error: 'upstream_unreachable',
+          message: String(e),
+          name: (e as any)?.name,
+          cause: String((e as any)?.cause ?? ''),
+        }),
+        { status: 502, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    // 1 retry on transient errors
+    try {
+      upstreamRes = await fetch(upstream, {
+        method: req.method,
+        headers: fwd,
+        body,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (e2) {
+      return new Response(
+        JSON.stringify({
+          error: 'upstream_unreachable',
+          message: String(e2),
+          name: (e2 as any)?.name,
+          cause: String((e2 as any)?.cause ?? ''),
+        }),
+        { status: 502, headers: { 'content-type': 'application/json' } },
+      );
+    }
   }
 
   // Extract Set-Cookie (Edge Runtime: use getSetCookie when available)

@@ -50,6 +50,8 @@ export type SiteAdapter = {
   courts: CourtName[];
   login: (id: string, pw: string) => Promise<LoginResult>;
   isSessionValid: (cookie: string) => Promise<boolean>;
+  /** Fine-grained session check; 'unknown' = upstream 502, not expiry */
+  checkSession: (cookie: string) => Promise<'valid' | 'expired' | 'unknown'>;
   logout: (cookie: string) => Promise<void>;
   getDaily: (courtId: number, cookie: string, date?: string) => Promise<DailyView | null>;
   getDailyBatch: (

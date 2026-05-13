@@ -68,7 +68,7 @@ export type DailyView = {
 
 export type LoginResult =
   | { ok: true; cookie: string }
-  | { ok: false; reason: 'bad_credentials' | 'network' | 'unknown'; detail?: string };
+  | { ok: false; reason: 'bad_credentials' | 'network' | 'unknown' | 'upstream_unreachable'; detail?: string };
 
 export type ReservationResult =
   | {
