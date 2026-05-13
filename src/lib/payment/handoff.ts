@@ -3,10 +3,14 @@ import type { SiteId } from '../sites/types';
 import { debugLog } from '@/components/DebugPanel';
 
 export type KcpHandoffOptions = {
+  /**
+   * Site identifier — included in mobile m_redirect_url so PaymentResult
+   * can determine which adapter to use for cancellation.
+   */
   siteId?: SiteId;
   /**
    * Called when the popup window is detected as closed (polled every 1 s).
-   * Not called if window.open() is blocked (returns null).
+   * PC popup flow only — NOT called in mobile redirect flow.
    */
   onWindowClosed?: () => void;
 };
@@ -31,19 +35,45 @@ function escAttr(s: string): string {
 }
 
 /**
- * Open the KCP payment window (PC + mobile unified).
+ * Normalize KCP action URL for mobile: spay.kcp.co.kr → smpay.kcp.co.kr.
+ * Other hosts are returned unchanged.
+ */
+export function toMobileAction(action: string): string {
+  try {
+    const u = new URL(action);
+    if (u.hostname === 'spay.kcp.co.kr') {
+      u.hostname = 'smpay.kcp.co.kr';
+    }
+    return u.toString();
+  } catch {
+    return action;
+  }
+}
+
+/**
+ * Returns true when running as an installed PWA in standalone display mode.
+ * iOS Safari sets navigator.standalone; other browsers use the CSS media query.
+ */
+export function isStandalonePwa(): boolean {
+  if (typeof window === 'undefined') return false;
+  if ((window.navigator as any).standalone === true) return true;
+  if (window.matchMedia?.('(display-mode: standalone)')?.matches === true) return true;
+  return false;
+}
+
+/**
+ * Open the KCP payment window.
  *
- * Builds a self-contained blob page that loads the KCP SDK (payplus_web.jsp)
- * and calls KCP_Pay_Execute(form). On PC this opens a popup; on mobile the
- * browser opens it as a new tab (popup window features are ignored by mobile
- * browsers). Either way the user can scroll freely and KCP_Pay_Execute handles
- * the payment UI.
+ * Mobile: m_redirect_url redirect flow — form.submit() to KCP with m_redirect_url,
+ * KCP redirects back to /payment-result after payment. No popup, no KCP SDK.
  *
- * gytennis flow: /rsvConfirm → jsf__pay → /rsvVf → KCP_Pay_Execute
- * We already called /rsvVf in reserve.ts, so we skip jsf__pay.
+ * PC: KCP_Pay_Execute popup flow — blob page loads payplus_web.jsp SDK and opens
+ * the KCP payment popup. onWindowClosed fires when the popup is closed.
+ *
+ * gytennis flow: /rsvConfirm → /rsvVf (already called) → KCP
  */
 export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Window | null {
-  const { onWindowClosed } = opts;
+  const { onWindowClosed, siteId } = opts;
 
   // Resolve action to absolute URL (gytennis-relative → absolute)
   const action = kcp.action.startsWith('http')
@@ -54,6 +84,46 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
     .map(([n, v]) => `<input type="hidden" name="${escAttr(n)}" value="${escAttr(v)}" />`)
     .join('\n');
 
+  if (isMobile()) {
+    // ── Mobile: current-tab POST → KCP mobile page (M-V2-a) ──────────────
+    // No window.open — form POSTs in current tab so KCP's mobile-viewport HTML
+    // renders full-screen, avoiding the PWA standalone in-app browser chrome.
+    // onWindowClosed is NOT called on mobile (PC popup flow only).
+    const orderId = kcp.fields.ordr_idxx ?? '';
+    const siteQuery = siteId ? `&site=${encodeURIComponent(siteId)}` : '';
+    const redirectUrl = `${location.origin}/payment-result?order_id=${encodeURIComponent(orderId)}${siteQuery}`;
+
+    // M-V1: spay.kcp.co.kr → mobile-spay.kcp.co.kr
+    const mobileAction = toMobileAction(action);
+
+    // M-V2-a: standalone PWA uses target=_blank to escape in-app overlay.
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = mobileAction;
+    form.acceptCharset = 'UTF-8';
+
+    const addField = (name: string, value: string) => {
+      const inp = document.createElement('input');
+      inp.type = 'hidden'; inp.name = name; inp.value = value;
+      form.appendChild(inp);
+    };
+
+    for (const [n, v] of Object.entries(kcp.fields)) addField(n, v);
+    addField('m_redirect_url', redirectUrl);
+    if (!kcp.fields.pay_method) addField('pay_method', '100000000000');
+
+    const standalone = isStandalonePwa();
+    if (standalone) form.target = '_blank';
+
+    document.body.appendChild(form);
+    debugLog('info', `KCP mobile (M-V1+V2a) action=${mobileAction} redirect=${redirectUrl} standalone=${standalone}`);
+    form.submit();
+    document.body.removeChild(form);
+
+    return null;
+  }
+
+  // ── PC: KCP_Pay_Execute popup flow ────────────────────────────────────────
   const pageHtml = `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -82,7 +152,6 @@ ${fieldsHtml}
 <script>
 window.addEventListener('load', function () {
   try {
-    // Ensure pay_method is set (jsf__pay normally does this)
     var pm = document.querySelector('input[name="pay_method"]');
     if (!pm) {
       pm = document.createElement('input');
@@ -105,13 +174,12 @@ window.addEventListener('load', function () {
   const blob = new Blob([pageHtml], { type: 'text/html;charset=utf-8' });
   const blobUrl = URL.createObjectURL(blob);
 
-  debugLog('info', `KCP blob 생성 action=${action} fields=${Object.keys(kcp.fields).join(',')}`);
+  debugLog('info', `KCP PC blob action=${action} fields=${Object.keys(kcp.fields).join(',')}`);
   const popup = window.open(blobUrl, '_blank', 'width=720,height=820,scrollbars=yes,resizable=yes');
   debugLog(popup ? 'info' : 'err', `팝업 open=${!!popup}`);
 
   setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
 
-  // Poll for popup/tab closure to detect cancel without payment
   if (popup && onWindowClosed) {
     let notified = false;
     const timer = setInterval(() => {
