@@ -22,6 +22,7 @@ export function debugLog(type: LogEntry['type'], msg: string) {
 export function DebugPanel() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [visible, setVisible] = useState(true);
+  const [copied, setCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,11 +54,14 @@ export function DebugPanel() {
           <button onClick={() => setLogs([])} className="text-slate-500 hover:text-white">clear</button>
           <button
             onClick={() => {
-              const text = logs.map((e) => `${e.ts} [${e.type}] ${e.msg}`).join('\n');
-              navigator.clipboard.writeText(text).catch(() => {});
+              const text = logs.map((e) => `[${e.ts}][${e.type}] ${e.msg}`).join('\n');
+              navigator.clipboard.writeText(text).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1000);
+              }).catch(() => {});
             }}
-            className="text-slate-500 hover:text-white"
-          >복사</button>
+            className={copied ? 'text-green-400' : 'text-slate-500 hover:text-white'}
+          >{copied ? '복사됨' : '복사'}</button>
           <button onClick={() => setVisible(false)} className="text-slate-500 hover:text-white">hide</button>
         </div>
       </div>
