@@ -111,14 +111,10 @@ export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set
               {courtNos.map((courtNo) => {
                 const slot = slotMap.get(`${hour}-${courtNo}`);
                 if (!slot) {
-                  // No parser data for this cell — visually dimmer than blocked to avoid confusion
                   return (
                     <td key={courtNo} className="min-h-[44px] min-w-[48px] text-center">
-                      <div
-                        className="min-h-[44px] min-w-[48px] flex items-center justify-center rounded bg-slate-950 border border-slate-900 text-slate-800 text-[10px]"
-                        title="데이터 없음"
-                      >
-                        ·
+                      <div className="min-h-[44px] min-w-[48px] flex items-center justify-center rounded bg-slate-950 border border-dashed border-slate-700 text-slate-600 text-[10px]">
+                        no data
                       </div>
                     </td>
                   );
