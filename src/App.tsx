@@ -6,6 +6,7 @@ import Race from './routes/Race';
 import Quick from './routes/Quick';
 import PaymentResult from './routes/PaymentResult';
 import { SiteSelector } from './components/SiteSelector';
+import { DebugPanel } from './components/DebugPanel';
 import { useSiteStore } from './stores/siteStore';
 import { useAuthStore } from './stores/authStore';
 
@@ -56,6 +57,7 @@ export default function App() {
         <br />
         made by hyun-seo
       </footer>
+      <DebugPanel />
     </div>
   );
 }
