@@ -53,8 +53,8 @@ import type { Favorite } from '../src/lib/storage/favorites';
 // ── 1. SitePolicy constants ────────────────────────────────────────────────────
 
 describe('SitePolicy constants', () => {
-  it('GY_POLICY has hours [6, 22] and bookableDays 21', () => {
-    expect(GY_POLICY.hours).toEqual([6, 22]);
+  it('GY_POLICY has hours [5, 22] and bookableDays 21', () => {
+    expect(GY_POLICY.hours).toEqual([5, 22]);
     expect(GY_POLICY.bookableDays).toBe(21);
     expect(GY_POLICY.hourlyFee).toBeNull();
   });

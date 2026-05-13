@@ -73,7 +73,7 @@ export type SiteAdapter = {
 // ──────────────────────────────────────────────────────────────────────────────
 
 export const GY_POLICY: SitePolicy = {
-  hours: [6, 22],
+  hours: [5, 22],
   dailyMaxSlots: 0, // dynamic (data-sot)
   perCourtMaxSlots: 0, // dynamic (data-soc)
   bookableDays: 21,
