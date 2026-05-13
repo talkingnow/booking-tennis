@@ -69,11 +69,14 @@ export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set
     return Array.from(new Set(slots.map((x) => x.hour))).sort((a, b) => a - b);
   }, [hours, siteId, slots]);
 
-  // Determine column court numbers
-  const metaCourtNos = getCourt(siteId, courtId)?.courtNos;
-  const courtNos = metaCourtNos?.length
-    ? metaCourtNos
-    : Array.from(new Set(slots.map((s) => s.courtNo))).sort((a, b) => a - b);
+  // Determine column court numbers — union of meta and slots-derived so stale
+  // registry entries never hide faces that the parser actually found.
+  const courtNos = useMemo(() => {
+    const metaNos = getCourt(siteId, courtId)?.courtNos ?? [];
+    const slotNos = slots.map((s) => s.courtNo);
+    const merged = Array.from(new Set([...metaNos, ...slotNos])).sort((a, b) => a - b);
+    return merged.length ? merged : metaNos;
+  }, [siteId, courtId, slots]);
 
   // Build lookup: `${hour}-${courtNo}` → Slot
   const slotMap = new Map<string, Slot>();
