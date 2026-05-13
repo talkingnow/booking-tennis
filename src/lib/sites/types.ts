@@ -17,6 +17,8 @@ export type SiteId = 'gy' | 'pj';
 export type SitePolicy = {
   /** [startHour, endHour] inclusive-exclusive, 24h */
   hours: [number, number];
+  /** Hour increment between slots. GY=2 (even hours only), PJ=1. Default 1. */
+  hourStep?: number;
   /** Max contiguous slots per person per day (0 = dynamic via data-sot) */
   dailyMaxSlots: number;
   /** Max contiguous slots per court per booking (0 = dynamic via data-soc) */
@@ -74,6 +76,7 @@ export type SiteAdapter = {
 
 export const GY_POLICY: SitePolicy = {
   hours: [5, 22],
+  hourStep: 2, // GY slots are 2-hour blocks: 06, 08, 10, ... (05 open, even hours)
   dailyMaxSlots: 0, // dynamic (data-sot)
   perCourtMaxSlots: 0, // dynamic (data-soc)
   bookableDays: 21,
