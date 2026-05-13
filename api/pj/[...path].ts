@@ -1,4 +1,4 @@
-export const config = { runtime: 'edge', regions: ['icn1'] };
+export const config = { runtime: 'edge', regions: ['hnd1'] };
 
 const UPSTREAM = 'https://www.pjtennis.or.kr';
 const ALLOWED_PATHS = [
