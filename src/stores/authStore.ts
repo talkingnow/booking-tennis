@@ -4,11 +4,26 @@ import { clearSession, loadSession, saveSession, migrateLegacySession } from '@/
 import type { SiteId } from '@/lib/sites/types';
 import { getSite, isRegistered } from '@/lib/sites/registry';
 
+export type SiteAuthResult =
+  | 'idle' | 'validating' | 'valid' | 'expired' | 'no_account' | 'error';
+
+export type SiteAuthMeta = {
+  lastValidatedAt: number | null;
+  lastResult: SiteAuthResult;
+  lastError?: string;
+};
+
+export function selectMeta(siteId: SiteId) {
+  return (s: AuthState): SiteAuthMeta =>
+    s.meta[siteId] ?? { lastValidatedAt: null, lastResult: 'idle' };
+}
+
 type AuthState = {
   accounts: Partial<Record<SiteId, StoredAccount>>;
   cookies: Partial<Record<SiteId, string>>;
   busy: boolean;
   error: string | null;
+  meta: Partial<Record<SiteId, SiteAuthMeta>>;
   hydrate: () => void;
   /**
    * Persist credentials to localStorage for the given site and update store.
@@ -55,6 +70,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   cookies: {},
   busy: false,
   error: null,
+  meta: {},
 
   hydrate: () => {
     // One-time legacy key migration (bt:account → bt:account:gy, etc.)
@@ -94,7 +110,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return Promise.resolve(false);
     }
 
-    set({ busy: true, error: null });
+    set((state) => ({
+      busy: true,
+      error: null,
+      meta: {
+        ...state.meta,
+        [siteId]: { lastValidatedAt: null, lastResult: 'validating' as SiteAuthResult },
+      },
+    }));
 
     _loginPromises[siteId] = Promise.resolve().then(() => {
       const adapter = getSite(siteId);
@@ -105,23 +128,40 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set((state) => ({
           cookies: { ...state.cookies, [siteId]: result.cookie },
           busy: false,
+          meta: {
+            ...state.meta,
+            [siteId]: { lastValidatedAt: Date.now(), lastResult: 'valid' as SiteAuthResult },
+          },
         }));
         return true;
       }
-      set({
+      const errMsg =
+        result.reason === 'bad_credentials'
+          ? '아이디 또는 비밀번호가 올바르지 않습니다.'
+          : result.reason === 'upstream_unreachable'
+            ? '서버 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.'
+            : result.reason === 'network'
+              ? '네트워크 오류가 발생했습니다.'
+              : '로그인에 실패했습니다.';
+      set((state) => ({
         busy: false,
-        error:
-          result.reason === 'bad_credentials'
-            ? '아이디 또는 비밀번호가 올바르지 않습니다.'
-            : result.reason === 'upstream_unreachable'
-              ? '서버 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.'
-              : result.reason === 'network'
-                ? '네트워크 오류가 발생했습니다.'
-                : '로그인에 실패했습니다.',
-      });
+        error: errMsg,
+        meta: {
+          ...state.meta,
+          [siteId]: { lastValidatedAt: Date.now(), lastResult: 'error' as SiteAuthResult, lastError: errMsg },
+        },
+      }));
       return false;
     }).catch(() => {
-      set({ busy: false, error: '로그인 중 오류가 발생했습니다.' });
+      const errMsg = '로그인 중 오류가 발생했습니다.';
+      set((state) => ({
+        busy: false,
+        error: errMsg,
+        meta: {
+          ...state.meta,
+          [siteId]: { lastValidatedAt: Date.now(), lastResult: 'error' as SiteAuthResult, lastError: errMsg },
+        },
+      }));
       return false;
     }).finally(() => {
       delete _loginPromises[siteId];
@@ -164,7 +204,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const account = accounts[siteId];
 
     // No credentials at all — nothing to do
-    if (!cookie && !account) return false;
+    if (!cookie && !account) {
+      set((state) => ({
+        meta: {
+          ...state.meta,
+          [siteId]: { lastValidatedAt: Date.now(), lastResult: 'no_account' as SiteAuthResult },
+        },
+      }));
+      return false;
+    }
 
     // No cookie but account exists — fire login directly
     if (!cookie && account) {
@@ -173,20 +221,50 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     // Cookie exists — verify with the site
     if (!isRegistered(siteId)) return false;
+
+    set((state) => ({
+      meta: {
+        ...state.meta,
+        [siteId]: { lastValidatedAt: null, lastResult: 'validating' as SiteAuthResult },
+      },
+    }));
+
     const adapter = getSite(siteId);
     const status = await adapter.checkSession(cookie!);
 
-    if (status === 'valid') return true;
+    if (status === 'valid') {
+      set((state) => ({
+        meta: {
+          ...state.meta,
+          [siteId]: { lastValidatedAt: Date.now(), lastResult: 'valid' as SiteAuthResult },
+        },
+      }));
+      return true;
+    }
     if (status === 'unknown') return false; // 502 — don't treat as expiry
 
     // expired — re-login if we have credentials
-    if (account) return doLogin(siteId);
+    if (account) {
+      set((state) => ({
+        meta: {
+          ...state.meta,
+          [siteId]: { lastValidatedAt: null, lastResult: 'expired' as SiteAuthResult },
+        },
+      }));
+      return doLogin(siteId);
+    }
     // expired but no stored credentials — clear stale session quietly
     clearSession(siteId);
     set((state) => {
       const c = { ...state.cookies };
       delete c[siteId];
-      return { cookies: c };
+      return {
+        cookies: c,
+        meta: {
+          ...state.meta,
+          [siteId]: { lastValidatedAt: Date.now(), lastResult: 'expired' as SiteAuthResult },
+        },
+      };
     });
     return false;
   },

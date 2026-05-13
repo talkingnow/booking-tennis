@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useSiteStore } from '@/stores/siteStore';
 import { isRegistered, getSite } from '@/lib/sites/registry';
+import { LoginBadge } from '@/components/LoginBadge';
 
 export default function Home() {
   const { activeSiteId } = useSiteStore();
@@ -10,6 +11,14 @@ export default function Home() {
 
   return (
     <div className="space-y-4">
+      <section className="rounded-2xl bg-panel p-5">
+        <h2 className="text-base font-semibold mb-3">로그인 상태</h2>
+        <div className="space-y-2">
+          <LoginBadge siteId="gy" />
+          <LoginBadge siteId="pj" />
+        </div>
+      </section>
+
       <section className="rounded-2xl bg-panel p-5">
         <h2 className="text-base font-semibold mb-1">계정</h2>
         <p className="text-sm text-slate-400 mb-3">{siteName} 로그인 정보 관리</p>
