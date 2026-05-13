@@ -96,6 +96,15 @@ export default async function handler(req: Request): Promise<Response> {
       msg.includes('network') || msg.includes('abort');
   }
 
+  function diagErr(e: unknown) {
+    return {
+      name: (e as any)?.name,
+      message: String((e as any)?.message ?? e),
+      cause: String((e as any)?.cause ?? ''),
+      stack: (e as any)?.stack?.split('\n').slice(0, 3).join(' | '),
+    };
+  }
+
   let upstreamRes: Response;
   try {
     upstreamRes = await fetch(upstream, {
@@ -103,37 +112,30 @@ export default async function handler(req: Request): Promise<Response> {
       headers: fwd,
       body,
       redirect: 'manual',
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(5000),
     });
   } catch (e) {
+    console.error('upstream fail', { ...diagErr(e), upstream });
     if (!isTransientError(e)) {
       return new Response(
-        JSON.stringify({
-          error: 'upstream_unreachable',
-          message: String(e),
-          name: (e as any)?.name,
-          cause: String((e as any)?.cause ?? ''),
-        }),
+        JSON.stringify({ error: 'upstream_unreachable', ...diagErr(e) }),
         { status: 502, headers: { 'content-type': 'application/json' } },
       );
     }
-    // 1 retry on transient errors
+    // 1 retry on transient errors (200ms delay)
+    await new Promise((r) => setTimeout(r, 200));
     try {
       upstreamRes = await fetch(upstream, {
         method: req.method,
         headers: fwd,
         body,
         redirect: 'manual',
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(5000),
       });
     } catch (e2) {
+      console.error('upstream fail retry', { ...diagErr(e2), upstream });
       return new Response(
-        JSON.stringify({
-          error: 'upstream_unreachable',
-          message: String(e2),
-          name: (e2 as any)?.name,
-          cause: String((e2 as any)?.cause ?? ''),
-        }),
+        JSON.stringify({ error: 'upstream_unreachable', ...diagErr(e2) }),
         { status: 502, headers: { 'content-type': 'application/json' } },
       );
     }
