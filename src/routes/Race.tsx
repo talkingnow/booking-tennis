@@ -81,37 +81,40 @@ function defaultOpenDate_gy(): string {
 }
 
 /**
- * Next Friday 07:00 (Asia/Seoul) in datetime-local format. (파주시 기본)
- * If today is Friday and it's before 07:00, returns today at 07:00.
- * Otherwise returns the next Friday.
+ * Next open time (Asia/Seoul) in datetime-local format. (파주시 기본)
+ * Every day at 07:00 AM.
+ * If today is before 07:00 KST, returns today at 07:00 KST.
+ * Otherwise returns tomorrow at 07:00 KST.
  */
 function defaultOpenDate_pj(): string {
-  // Use a simple offset-based KST calculation (UTC+9)
   const nowUTC = Date.now();
   const kstOffset = 9 * 60 * 60 * 1000;
   const nowKST = new Date(nowUTC + kstOffset);
 
-  // Find next Friday (dayOfWeek 5) at 07:00 KST
-  const dayOfWeek = nowKST.getUTCDay(); // 0=Sun ... 5=Fri
-  let daysUntilFriday = (5 - dayOfWeek + 7) % 7;
-  // If today is Friday but we're already past 07:00 KST, advance one week
-  if (daysUntilFriday === 0) {
-    const currentHourKST = nowKST.getUTCHours();
-    if (currentHourKST >= 7) daysUntilFriday = 7;
+  const targetKST = new Date(nowKST);
+  if (nowKST.getUTCHours() >= 7) {
+    targetKST.setUTCDate(targetKST.getUTCDate() + 1);
   }
-  const targetKST = new Date(nowUTC + kstOffset + daysUntilFriday * 24 * 60 * 60 * 1000);
-  // Set to 07:00 KST = 07:00 UTC+9
   targetKST.setUTCHours(7, 0, 0, 0);
 
-  // Convert back to local Date for toLocalInput
   const localDate = new Date(targetKST.getTime() - kstOffset);
   return toLocalInput(localDate);
+}
+
+function defaultTargetDate_pj(): string {
+  const d = new Date(defaultOpenDate_pj());
+  d.setDate(d.getDate() + 6);
+  // Need to extract the YYYY-MM-DD part from the local date
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 // ─── component ────────────────────────────────────────────────────────────────
 
 export default function Race() {
-  const { cookies, accounts, hydrate, doLogin, busy } = useAuthStore();
+  const { cookies, accounts, hydrate, busy } = useAuthStore();
   const { activeSiteId } = useSiteStore();
   const setArmed = useUiStore((s) => s.setArmed);
 
@@ -137,17 +140,25 @@ export default function Race() {
   // add-form state
   const [newCourtId, setNewCourtId] = useState(() => courts[0]?.id ?? 1);
   const [newCourtNo, setNewCourtNo] = useState(() => courts[0]?.courtNos[0] ?? 1);
-  const [newDate, setNewDate]       = useState(defaultDate());
+  const [newDate, setNewDate]       = useState(() =>
+    useSiteStore.getState().activeSiteId === 'pj' ? defaultTargetDate_pj() : defaultDate()
+  );
   const [newHour, setNewHour]       = useState(SLOT_HOURS[SLOT_HOURS.length > 4 ? 2 : 0] ?? 12);
 
   // Default fire time depends on site
   const [target, setTarget] = useState(() =>
-    activeSiteId === 'pj' ? defaultOpenDate_pj() : defaultOpenDate_gy(),
+    useSiteStore.getState().activeSiteId === 'pj' ? defaultOpenDate_pj() : defaultOpenDate_gy()
   );
 
   // Update target + form defaults when site changes
   useEffect(() => {
-    setTarget(activeSiteId === 'pj' ? defaultOpenDate_pj() : defaultOpenDate_gy());
+    if (activeSiteId === 'pj') {
+      setTarget(defaultOpenDate_pj());
+      setNewDate(defaultTargetDate_pj());
+    } else {
+      setTarget(defaultOpenDate_gy());
+      setNewDate(defaultDate());
+    }
     const firstCourt = courts[0];
     if (firstCourt) {
       setNewCourtId(firstCourt.id);
@@ -182,11 +193,6 @@ export default function Race() {
   useEffect(() => { activeSiteIdRef.current = activeSiteId; }, [activeSiteId]);
 
   useEffect(() => { hydrate(); }, [hydrate]);
-  useEffect(() => {
-    if (!cookies[activeSiteId] && accounts[activeSiteId]) {
-      doLogin(activeSiteId);
-    }
-  }, [activeSiteId, cookies, accounts, doLogin]);
 
   const targetMs = useMemo(() => new Date(target).getTime(), [target]);
 
@@ -305,11 +311,11 @@ export default function Race() {
     await fire();
   };
 
-  const openPaymentPopup = () => {
+  const openPaymentPopup = async () => {
     const current = kcpReadyRef.current;
     if (!current) return;
     payConfirmedRef.current = false;
-    openKcpPayment(current.kcp, {
+    await openKcpPayment(current.kcp, {
       siteId: activeSiteIdRef.current,
       onWindowClosed: async () => {
         if (!payConfirmedRef.current) {
@@ -366,7 +372,7 @@ export default function Race() {
   const newCourtNos = getCourt(activeSiteId, newCourtId)?.courtNos ?? [1, 2, 3, 4];
 
   const openDateNote = activeSiteId === 'pj'
-    ? '파주시: 매주 금요일 07:00에 다음주 예약 오픈'
+    ? '파주시: 희망일 6일 전 07:00 오픈'
     : '고양시: 매달 25일 22:00에 다음달 예약 오픈';
 
   return (
@@ -443,12 +449,30 @@ export default function Race() {
                   <label className="block text-xs text-slate-500 mb-1">날짜</label>
                   <div className="flex gap-1">
                     <input type="date" value={newDate}
-                      onChange={(e) => setNewDate(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewDate(val);
+                        if (activeSiteId === 'pj' && val) {
+                          const d = new Date(val);
+                          d.setDate(d.getDate() - 6);
+                          d.setHours(7, 0, 0, 0);
+                          setTarget(toLocalInput(d));
+                        }
+                      }}
                       className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs"
                     />
                     <button
                       type="button"
-                      onClick={() => setNewDate(defaultDate())}
+                      onClick={() => {
+                        const nextMonth = defaultDate();
+                        setNewDate(nextMonth);
+                        if (activeSiteId === 'pj' && nextMonth) {
+                          const d = new Date(nextMonth);
+                          d.setDate(d.getDate() - 6);
+                          d.setHours(7, 0, 0, 0);
+                          setTarget(toLocalInput(d));
+                        }
+                      }}
                       className="text-xs px-2 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 shrink-0"
                       title="다음달 오늘"
                     >+1달</button>

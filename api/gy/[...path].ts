@@ -11,6 +11,7 @@ const ALLOWED_PATHS = [
   /^\/myPage$/,
   /^\/tooltip$/,
   /^\/$/,
+  /^\/rsvPy$/,
 ];
 
 const STRIP_REQ_HEADERS = new Set([

@@ -1,6 +1,9 @@
 import type { KcpForm } from '../gytennis/types';
 import type { SiteId } from '../sites/types';
 import { debugLog } from '@/components/DebugPanel';
+import { gyFetch } from '../gytennis/proxyClient';
+import { parseKcpForm } from '../parsers/kcpParser';
+import { useAuthStore } from '@/stores/authStore';
 
 export type KcpHandoffOptions = {
   /**
@@ -72,7 +75,7 @@ export function isStandalonePwa(): boolean {
  *
  * gytennis flow: /rsvConfirm → /rsvVf (already called) → KCP
  */
-export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Window | null {
+export async function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Promise<Window | null> {
   const { onWindowClosed, siteId } = opts;
 
   // Resolve action to absolute URL (gytennis-relative → absolute)
@@ -85,16 +88,42 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
     .join('\n');
 
   if (isMobile()) {
+    let targetAction = action;
+    let targetFields = kcp.fields;
+
+    // ── 2-hop resolution: /rsvPy is gytennis intermediate, not KCP ───────
+    if (kcp.action.includes('/rsvPy') || !kcp.action.includes('kcp.co.kr')) {
+      debugLog('info', `KCP 2-hop start action=${kcp.action}`);
+      const siteIdToUse = siteId || 'gy';
+      const c = useAuthStore.getState().cookies[siteIdToUse];
+      if (c) {
+        const searchParams = new URLSearchParams();
+        for (const [k, v] of Object.entries(kcp.fields)) searchParams.append(k, v);
+        
+        const res = await gyFetch(kcp.action, { method: 'POST', body: searchParams, cookie: c });
+        if (res.status === 200) {
+          const html = await res.text();
+          const innerForm = parseKcpForm(html);
+          if (innerForm && innerForm.action.includes('kcp.co.kr')) {
+            targetAction = innerForm.action;
+            targetFields = innerForm.fields;
+            debugLog('info', `KCP 2-hop success — submitting to smpay`);
+          } else {
+            debugLog('err', `KCP 2-hop failed — no inner KCP form found`);
+          }
+        } else {
+          debugLog('err', `KCP 2-hop failed — status ${res.status}`);
+        }
+      }
+    }
+
     // ── Mobile: current-tab POST → KCP mobile page (M-V2-a) ──────────────
-    // No window.open — form POSTs in current tab so KCP's mobile-viewport HTML
-    // renders full-screen, avoiding the PWA standalone in-app browser chrome.
-    // onWindowClosed is NOT called on mobile (PC popup flow only).
-    const orderId = kcp.fields.ordr_idxx ?? '';
+    const orderId = targetFields.ordr_idxx ?? '';
     const siteQuery = siteId ? `&site=${encodeURIComponent(siteId)}` : '';
     const redirectUrl = `${location.origin}/payment-result?order_id=${encodeURIComponent(orderId)}${siteQuery}`;
 
     // M-V1: spay.kcp.co.kr → mobile-spay.kcp.co.kr
-    const mobileAction = toMobileAction(action);
+    const mobileAction = toMobileAction(targetAction);
 
     // M-V2-a: standalone PWA uses target=_blank to escape in-app overlay.
     const form = document.createElement('form');
@@ -105,7 +134,6 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
     // Redirect-related fields from gytennis's rsvConfirm form must be stripped
     // and replaced with our own m_redirect_url. If gytennis's URL reaches KCP,
     // the browser is sent to gytennis.or.kr/ordrErr (no session cookie → 예약 만료).
-    // Extended set covers all known case variants (KCP and gytennis are case-sensitive).
     const REDIRECT_FIELDS = new Set([
       'm_redirect_url', 'Ret_URL', 'ret_url', 'RETURN_URL', 'return_url',
       'callback_url', 'noti_url', 'KCPRedirectURL',
@@ -121,12 +149,12 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
     };
 
     const strippedNames: string[] = [];
-    for (const [n, v] of Object.entries(kcp.fields)) {
+    for (const [n, v] of Object.entries(targetFields)) {
       if (REDIRECT_FIELDS.has(n)) { strippedNames.push(n); continue; }
       addField(n, v);
     }
     addField('m_redirect_url', redirectUrl);
-    if (!kcp.fields.pay_method) addField('pay_method', '100000000000');
+    if (!targetFields.pay_method) addField('pay_method', '100000000000');
 
     const standalone = isStandalonePwa();
     if (standalone) form.target = '_blank';

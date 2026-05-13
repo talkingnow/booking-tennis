@@ -21,7 +21,14 @@ export default function Quick() {
   const account = accounts[activeSiteId] ?? null;
   const cookie = cookies[activeSiteId] ?? null;
 
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const getLocalDateString = (d: Date = new Date()) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const [date, setDate] = useState(() => getLocalDateString());
   const [data, setData] = useState<Map<number, DailyView | null>>(new Map());
   const [loading, setLoading] = useState(false);
   const [busySlot, setBusySlot] = useState<string | null>(null);
@@ -37,13 +44,6 @@ export default function Quick() {
   // Hydrate stores once
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { hydrate(); fav.hydrate(); }, []);
-
-  // Auto-login when session is missing but credentials exist for this site
-  useEffect(() => {
-    if (!cookies[activeSiteId] && accounts[activeSiteId]) {
-      doLogin(activeSiteId);
-    }
-  }, [activeSiteId, cookies, accounts, doLogin]);
 
   // Reset data when site changes
   useEffect(() => {
@@ -143,7 +143,7 @@ export default function Quick() {
       payConfirmedRef.current = false;
       setPendingSlots((prev) => new Set([...prev, s.raw]));
       if (!isMobile()) setKcpReady({ orderId, kcp: result.kcp, slotRaw: s.raw });
-      openKcpPayment(result.kcp, {
+      await openKcpPayment(result.kcp, {
         siteId: activeSiteId,
         onWindowClosed: async () => {
           if (!payConfirmedRef.current) {
@@ -183,6 +183,28 @@ export default function Quick() {
 
   // Hour range for display
   const [startHour, endHour] = policy?.hours ?? [6, 22];
+
+  const minDate = getLocalDateString(new Date());
+  let maxDate = '';
+
+  if (activeSiteId === 'pj') {
+    const maxD = new Date();
+    maxD.setDate(maxD.getDate() + 6);
+    maxDate = getLocalDateString(maxD);
+  } else if (activeSiteId === 'gy') {
+    const today = new Date();
+    const maxD = new Date(today.getFullYear(), today.getMonth() + (today.getDate() >= 25 ? 2 : 1), 0);
+    maxDate = getLocalDateString(maxD);
+  }
+
+  // Effect to clamp date when site changes or today rolls over
+  useEffect(() => {
+    if (date < minDate) {
+      setDate(minDate);
+    } else if (maxDate && date > maxDate) {
+      setDate(maxDate);
+    }
+  }, [date, minDate, maxDate]);
 
   return (
     <div className="space-y-4">
@@ -275,6 +297,8 @@ export default function Quick() {
             <label className="block text-xs text-slate-400 mb-1">조회 날짜</label>
             <input
               type="date"
+              min={minDate}
+              max={maxDate || undefined}
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"

@@ -9,6 +9,7 @@ export function parseKcpForm(html: string): KcpForm | null {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const forms = Array.from(doc.querySelectorAll<HTMLFormElement>('form'));
   const form =
+    forms.find((f) => /(smpay|spay)\.kcp\.co\.kr/i.test(f.getAttribute('action') ?? '')) ??
     forms.find((f) => /kcp/i.test(f.getAttribute('action') ?? '')) ??
     forms.find((f) => f.querySelector('input[name="ordr_idxx"]'));
   if (!form) return null;
@@ -25,11 +26,25 @@ export function parseKcpForm(html: string): KcpForm | null {
 
 /**
  * Extract the order id from a /rsvConfirm response.
- * Looks for hidden input `name="ordr_idxx"` first, then any string matching GYP\\d+\\w+.
+ * Looks for hidden input `name="ordr_idxx"` first, then any string matching GYP or PJP prefixes.
  */
 export function extractOrderId(html: string): string | null {
-  const m = html.match(/name="ordr_idxx"\s+value="([^"]+)"/);
+  // First attempt: DOM parsing (handles any attribute order/spacing)
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const input = doc.querySelector('input[name="ordr_idxx"]');
+    if (input && (input as HTMLInputElement).value) {
+      return (input as HTMLInputElement).value;
+    }
+  } catch {
+    // ignore dom parse error
+  }
+
+  // Second attempt: strict regex on raw html
+  const m = html.match(/name="ordr_idxx"[^>]*value="([^"]+)"/);
   if (m) return m[1];
-  const fallback = html.match(/GYP\d{17,}[A-Z0-9]+/);
+
+  // Fallback: match typical order ID patterns for GY and PJ
+  const fallback = html.match(/(GYP|PJP|PAY)\d{15,}[A-Z0-9]+/);
   return fallback ? fallback[0] : null;
 }

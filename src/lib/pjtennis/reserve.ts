@@ -50,21 +50,24 @@ export async function submitReservation(
   }
 
   const reason = classifyError(html);
-  debugLog('err', `pj rsvConfirm 실패 reason=${reason}`);
+  debugLog('err', `pj rsvConfirm 실패 reason=${reason} htmlSnippet=${html.slice(0, 200).replace(/\s+/g, ' ')}`);
   return { ok: false, reason };
 }
+
+// Both rsvVf and rsvCls might be XHR endpoints.
+const XHR_HEADERS = { 'X-Requested-With': 'XMLHttpRequest' };
 
 /** Verify a reservation right after /rsvConfirm. */
 export async function verifyReservation(orderId: string, cookie: string): Promise<boolean> {
   const body = new URLSearchParams({ id: orderId });
-  const res = await pjFetch('/rsvVf', { method: 'POST', body, cookie });
+  const res = await pjFetch('/rsvVf', { method: 'POST', body, cookie, headers: XHR_HEADERS });
   return res.status === 200;
 }
 
 /** Release a reserved-but-unpaid slot. */
 export async function cancelReservation(orderId: string, cookie: string): Promise<boolean> {
   const body = new URLSearchParams({ id: orderId });
-  const res = await pjFetch('/rsvCls', { method: 'POST', body, cookie });
+  const res = await pjFetch('/rsvCls', { method: 'POST', body, cookie, headers: XHR_HEADERS });
   return res.status === 200;
 }
 
