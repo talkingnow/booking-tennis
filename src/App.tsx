@@ -7,14 +7,25 @@ import Quick from './routes/Quick';
 import PaymentResult from './routes/PaymentResult';
 import { SiteSelector } from './components/SiteSelector';
 import { useSiteStore } from './stores/siteStore';
+import { useAuthStore } from './stores/authStore';
 
 export default function App() {
   const loc = useLocation();
   const isHome = loc.pathname === '/';
-  const { hydrate } = useSiteStore();
+  const { hydrate: hydrateSite } = useSiteStore();
+  const { hydrate: hydrateAuth, validateAndLogin, startKeepAlive, stopKeepAlive } = useAuthStore();
 
-  // Hydrate active site from localStorage on mount
-  useEffect(() => { hydrate(); }, [hydrate]);
+  // Hydrate stores and boot-time session validation on mount
+  useEffect(() => {
+    hydrateSite();
+    hydrateAuth();
+    // Fire-and-forget: validate/restore sessions for all configured sites
+    validateAndLogin('gy');
+    validateAndLogin('pj');
+    startKeepAlive();
+    return () => { stopKeepAlive(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="min-h-dvh bg-bg text-slate-100 flex flex-col">

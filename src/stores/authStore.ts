@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { clearAccount, loadAccount, saveAccount, migrateLegacyAccount, type StoredAccount } from '@/lib/storage/account';
 import { clearSession, loadSession, saveSession, migrateLegacySession } from '@/lib/storage/session';
 import type { SiteId } from '@/lib/sites/types';
-import { getSite } from '@/lib/sites/registry';
+import { getSite, isRegistered } from '@/lib/sites/registry';
 
 type AuthState = {
   accounts: Partial<Record<SiteId, StoredAccount>>;
@@ -26,10 +26,29 @@ type AuthState = {
   doLogin: (siteId: SiteId, acc?: StoredAccount) => Promise<boolean>;
   doLogout: (siteId: SiteId) => Promise<void>;
   forget: (siteId: SiteId) => void;
+  /**
+   * Check session validity and re-login if expired.
+   * - 'unknown' (upstream 502): no-op, returns false without setting error.
+   * - 'expired': attempts doLogin, returns result.
+   * - 'valid': returns true immediately.
+   * - no cookie + account: fires doLogin directly.
+   * - no cookie + no account: returns false silently.
+   */
+  validateAndLogin: (siteId: SiteId) => Promise<boolean>;
+  /** Start a 25-min keep-alive interval; stops any existing interval first. */
+  startKeepAlive: () => void;
+  /** Clear the keep-alive interval. */
+  stopKeepAlive: () => void;
 };
 
 // In-flight login promises per site: concurrent callers share the same request.
 const _loginPromises: Partial<Record<SiteId, Promise<boolean>>> = {};
+
+// Keep-alive interval handle (module-level, survives re-renders)
+let _keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
+const KEEP_ALIVE_MS = 25 * 60 * 1000; // 25 minutes
+const SITE_IDS: SiteId[] = ['gy', 'pj'];
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   accounts: {},
@@ -137,5 +156,55 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       delete cookies[siteId];
       return { accounts, cookies };
     });
+  },
+
+  validateAndLogin: async (siteId: SiteId) => {
+    const { cookies, accounts, doLogin } = get();
+    const cookie = cookies[siteId];
+    const account = accounts[siteId];
+
+    // No credentials at all — nothing to do
+    if (!cookie && !account) return false;
+
+    // No cookie but account exists — fire login directly
+    if (!cookie && account) {
+      return doLogin(siteId);
+    }
+
+    // Cookie exists — verify with the site
+    if (!isRegistered(siteId)) return false;
+    const adapter = getSite(siteId);
+    const status = await adapter.checkSession(cookie!);
+
+    if (status === 'valid') return true;
+    if (status === 'unknown') return false; // 502 — don't treat as expiry
+
+    // expired — re-login if we have credentials
+    if (account) return doLogin(siteId);
+    // expired but no stored credentials — clear stale session quietly
+    clearSession(siteId);
+    set((state) => {
+      const c = { ...state.cookies };
+      delete c[siteId];
+      return { cookies: c };
+    });
+    return false;
+  },
+
+  startKeepAlive: () => {
+    if (_keepAliveTimer !== null) clearInterval(_keepAliveTimer);
+    _keepAliveTimer = setInterval(() => {
+      const { validateAndLogin } = useAuthStore.getState();
+      for (const siteId of SITE_IDS) {
+        validateAndLogin(siteId);
+      }
+    }, KEEP_ALIVE_MS);
+  },
+
+  stopKeepAlive: () => {
+    if (_keepAliveTimer !== null) {
+      clearInterval(_keepAliveTimer);
+      _keepAliveTimer = null;
+    }
   },
 }));
