@@ -102,13 +102,24 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
     form.action = mobileAction;
     form.acceptCharset = 'UTF-8';
 
+    // Redirect-related fields from gytennis's rsvConfirm form must be stripped
+    // and replaced with our own m_redirect_url. If gytennis's URL reaches KCP,
+    // the browser is sent to gytennis.or.kr/ordrErr (no session cookie → 예약 만료).
+    const REDIRECT_FIELDS = new Set([
+      'm_redirect_url', 'Ret_URL', 'ret_url', 'RETURN_URL', 'return_url',
+      'callback_url', 'noti_url', 'KCPRedirectURL',
+    ]);
+
     const addField = (name: string, value: string) => {
       const inp = document.createElement('input');
       inp.type = 'hidden'; inp.name = name; inp.value = value;
       form.appendChild(inp);
     };
 
-    for (const [n, v] of Object.entries(kcp.fields)) addField(n, v);
+    for (const [n, v] of Object.entries(kcp.fields)) {
+      if (REDIRECT_FIELDS.has(n)) continue;
+      addField(n, v);
+    }
     addField('m_redirect_url', redirectUrl);
     if (!kcp.fields.pay_method) addField('pay_method', '100000000000');
 
