@@ -112,7 +112,17 @@ export async function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {})
           /window\.open/i.test(html) ? 'window.open' : '',
           /smpay\.kcp\.co\.kr|spay\.kcp\.co\.kr/i.test(html) ? 'smpay-url' : '',
         ].filter(Boolean);
-        debugLog('info', `2hop resp status=${res.status} loc=${res.location||'-'} htmlLen=${html.length} forms=${formCount} actions=${JSON.stringify(actions)} hints=${JSON.stringify(scriptHints)} head=${html.slice(0,160).replace(/\s+/g,' ')}`);
+        // Capture hidden inputs from each <form> so we can see what state /rsvPy
+        // exposes (e.g. enc_info filled or empty, ordr_idxx echo, etc.).
+        const inputDumps = Array.from(html.matchAll(/<form[\s\S]*?<\/form>/gi)).map((fm) => {
+          const inputs = Array.from((fm[0] || '').matchAll(/<input[^>]*name=["']([^"']+)["'][^>]*?(?:value=["']([^"']*)["'])?/gi))
+            .map((im) => `${im[1]}=${(im[2]||'').length}b`).slice(0, 20).join(',');
+          return inputs;
+        });
+        const scripts = Array.from(html.matchAll(/<script[^>]*(?:src=["']([^"']+)["'])?[^>]*>([\s\S]{0,200}?)<\/script>/gi))
+          .map((sm) => sm[1] ? `src:${sm[1]}` : `inline:${(sm[2]||'').replace(/\s+/g,' ').slice(0,120)}`).slice(0, 6);
+        debugLog('info', `2hop resp status=${res.status} loc=${res.location||'-'} htmlLen=${html.length} forms=${formCount} actions=${JSON.stringify(actions)} hints=${JSON.stringify(scriptHints)} inputs=${JSON.stringify(inputDumps)} scripts=${JSON.stringify(scripts)}`);
+        debugLog('info', `2hop body[0..2400]=${html.slice(0,2400).replace(/\s+/g,' ')}`);
 
         const innerForm = res.status === 200 ? parseKcpForm(html) : null;
         if (innerForm && innerForm.action.includes('kcp.co.kr')) {
