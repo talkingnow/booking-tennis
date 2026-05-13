@@ -1,4 +1,5 @@
 import type { Slot, SlotStatus } from '../gytennis/types';
+import { debugLog } from '@/components/DebugPanel';
 
 // GY uses yxjorg[]/isvkrr[]/.ctooltip-trigger
 // PJ uses rjelnu[]/edhtqe[]/i.fa-user-clock + td[title="예약됨"]
@@ -25,31 +26,48 @@ function detectScheme(wholeTable: HTMLElement): SiteScheme {
  *   PJ (pjtennis): primary=rjelnu[], price=edhtqe[], reserved=i.fa-solid.fa-user-clock
  *                  or td[title="예약됨"]
  */
-export function parseSlots(html: string): Slot[] {
+export function parseSlots(html: string, opts: { debug?: boolean } = {}): Slot[] {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const wholeTable = doc.querySelector<HTMLElement>('table.wholeTable');
-  if (!wholeTable) return [];
+  if (!wholeTable) {
+    debugLog('err', 'slotParser: table.wholeTable not found — empty or wrong page');
+    return [];
+  }
 
   const scheme = detectScheme(wholeTable);
 
   const topRow = wholeTable.querySelector<HTMLTableRowElement>(':scope > tbody > tr, :scope > tr');
-  if (!topRow) return [];
+  if (!topRow) {
+    debugLog('err', `slotParser: scheme=${scheme} topRow not found`);
+    return [];
+  }
   const columns = Array.from(topRow.children).filter(
     (el) => el.tagName === 'TD',
   ) as HTMLElement[];
 
   const out: Slot[] = [];
+  let totalCells = 0;
   for (let i = 1; i < columns.length; i++) {
     const col = columns[i];
     const displayedCourtNo = parseDisplayedCourtNo(col);
     if (displayedCourtNo == null) continue;
 
     const cells = col.querySelectorAll<HTMLElement>('td.resTag');
+    totalCells += cells.length;
     cells.forEach((cell) => {
       const slot = parseCell(cell, displayedCourtNo, scheme);
       if (slot) out.push(slot);
     });
   }
+
+  // Always log parse summary for diagnostics (visible in DebugPanel)
+  const counts = { available: 0, reserved: 0, blocked: 0, pending: 0 };
+  for (const s of out) counts[s.status]++;
+  debugLog(out.length === 0 ? 'err' : 'info',
+    `slotParser scheme=${scheme} cols=${columns.length - 1} cells=${totalCells} slots=${out.length} ` +
+    `avail=${counts.available} reserved=${counts.reserved} blocked=${counts.blocked}`);
+
+  void opts;
   return out;
 }
 
