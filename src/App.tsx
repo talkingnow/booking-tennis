@@ -41,7 +41,7 @@ export default function App() {
           🎾 Booking Tennis
         </Link>
         <div className="flex items-center gap-3">
-          <SiteSelector />
+          <SiteSelector disabled={!isHome} />
           {!isHome && (
             <Link to="/" className="text-sm text-slate-400 hover:text-slate-200 shrink-0">
               홈

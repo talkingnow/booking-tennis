@@ -3,6 +3,7 @@ import { clearAccount, loadAccount, saveAccount, migrateLegacyAccount, type Stor
 import { clearSession, loadSession, saveSession, migrateLegacySession } from '@/lib/storage/session';
 import type { SiteId } from '@/lib/sites/types';
 import { getSite, isRegistered } from '@/lib/sites/registry';
+import { useUiStore } from './uiStore';
 
 export type SiteAuthResult =
   | 'idle' | 'validating' | 'valid' | 'expired' | 'no_account' | 'error';
@@ -219,7 +220,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     // No cookie but account exists — fire login directly
     if (!cookie && account) {
-      return doLogin(siteId);
+      if (useUiStore.getState().bootAutoLogin) {
+        return doLogin(siteId);
+      }
+      return false;
     }
 
     // Cookie exists — verify with the site

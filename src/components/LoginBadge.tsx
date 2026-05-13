@@ -21,6 +21,7 @@ function maskId(id: string): string {
 export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
   const meta = useAuthStore(selectMeta(siteId));
   const account = useAuthStore((s) => s.accounts[siteId]);
+  const cookie = useAuthStore((s) => s.cookies[siteId]);
   const [, tick] = useState(0);
 
   // Re-render every 30s to update relative time display
@@ -38,31 +39,14 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
   }, [siteId]);
 
   const { lastResult, lastValidatedAt, lastError } = meta;
-
-  // Hide if never touched and no account configured — avoid noise for single-site users
-  if (lastResult === 'idle' && !account) return null;
-
   const timeLabel = relativeTime(lastValidatedAt);
 
-  if (lastResult === 'idle') {
-    return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <span className="w-4 text-center">·</span>
-        <span>{siteName} 확인 중…</span>
-      </div>
-    );
-  }
+  const isActuallyValid = !!cookie && lastResult !== 'expired' && lastResult !== 'error' && lastResult !== 'validating';
 
-  if (lastResult === 'validating') {
-    return (
-      <div className="flex items-center gap-2 text-sm text-slate-400">
-        <span className="w-4 text-center animate-spin">↻</span>
-        <span>{siteName} 로그인 중…</span>
-      </div>
-    );
-  }
+  // Hide if never touched and no account configured — avoid noise for single-site users
+  if (lastResult === 'idle' && !account && !cookie) return null;
 
-  if (lastResult === 'valid') {
+  if (isActuallyValid || lastResult === 'valid') {
     return (
       <div className="flex items-center gap-2 text-sm text-green-400">
         <span className="w-4 text-center">✓</span>
@@ -70,6 +54,23 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
           {siteName} 로그인됨{account ? ` ${maskId(account.id)}` : ''}
         </span>
         {timeLabel && <span className="text-xs text-slate-500">{timeLabel}</span>}
+      </div>
+    );
+  }
+
+  if (lastResult === 'idle') {
+    if (!cookie && account) {
+      return (
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <span className="w-4 text-center">·</span>
+          <span>{siteName} 미로그인</span>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <span className="w-4 text-center">·</span>
+        <span>{siteName} 확인 중…</span>
       </div>
     );
   }

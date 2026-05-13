@@ -14,6 +14,7 @@ vi.mock('../src/lib/sites/registry', () => ({
 
 import { getSite } from '../src/lib/sites/registry';
 import { useAuthStore } from '../src/stores/authStore';
+import { useUiStore } from '../src/stores/uiStore';
 
 import type { LoginResult } from '../src/lib/gytennis/types';
 
@@ -34,6 +35,7 @@ beforeEach(() => {
     busy: false,
     error: null,
   });
+  useUiStore.setState({ bootAutoLogin: true }); // Default true for legacy tests
 });
 
 afterEach(() => {
@@ -48,7 +50,7 @@ describe('validateAndLogin', () => {
     expect(useAuthStore.getState().error).toBeNull();
   });
 
-  it('calls doLogin when cookie is missing but account exists', async () => {
+  it('calls doLogin when cookie is missing but account exists and bootAutoLogin is true', async () => {
     // Seed an account but no cookie
     useAuthStore.setState({
       accounts: { gy: { id: 'user1', pw: 'pw1', remember: true, savedAt: Date.now() } },
@@ -69,6 +71,17 @@ describe('validateAndLogin', () => {
     const result = await useAuthStore.getState().validateAndLogin('gy');
     expect(result).toBe(true);
     vi.unstubAllGlobals();
+  });
+
+  it('does NOT call doLogin when cookie is missing but account exists if bootAutoLogin is false', async () => {
+    useUiStore.setState({ bootAutoLogin: false });
+    useAuthStore.setState({
+      accounts: { gy: { id: 'user1', pw: 'pw1', remember: true, savedAt: Date.now() } },
+      cookies: {},
+    });
+
+    const result = await useAuthStore.getState().validateAndLogin('gy');
+    expect(result).toBe(false);
   });
 
   it('returns true without re-login when checkSession=valid', async () => {
