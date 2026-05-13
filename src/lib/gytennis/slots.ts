@@ -25,16 +25,24 @@ export async function getDaily(
 }
 
 /**
- * Fetch daily views for several courts in parallel.
+ * Fetch daily views for several courts with staggered start times.
  * Uses allSettled so one 502 court doesn't suppress results from others.
+ * stagger (ms) between consecutive request launches reduces rate-limit risk.
  */
 export async function getDailyBatch(
   courtIds: number[],
   cookie: string,
   date?: string,
+  stagger = 250,
 ): Promise<Map<number, DailyView | null>> {
   const out = new Map<number, DailyView | null>();
-  const results = await Promise.allSettled(courtIds.map((id) => getDaily(id, cookie, date)));
+  const results = await Promise.allSettled(
+    courtIds.map((id, i) =>
+      new Promise<void>((resolve) => setTimeout(resolve, i * stagger)).then(() =>
+        getDaily(id, cookie, date),
+      ),
+    ),
+  );
   courtIds.forEach((id, i) => {
     const r = results[i];
     out.set(id, r.status === 'fulfilled' ? r.value : null);
