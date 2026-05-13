@@ -85,7 +85,9 @@ export const GY_POLICY: SitePolicy = {
 };
 
 export const PJ_POLICY: SitePolicy = {
-  hours: [7, 21],
+  // Display range 06..21 (16 rows). Court faces expose 06 and 21 slot rows;
+  // upstream booking window is 07~21, but server controls bookable availability per cell.
+  hours: [6, 22],
   dailyMaxSlots: 2, // 1일 1면 2시간 = 1h 슬롯 2개
   perCourtMaxSlots: 2,
   bookableDays: 7,

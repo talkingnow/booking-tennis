@@ -59,8 +59,8 @@ describe('SitePolicy constants', () => {
     expect(GY_POLICY.hourlyFee).toBeNull();
   });
 
-  it('PJ_POLICY has hours [7, 21] and bookableDays 7', () => {
-    expect(PJ_POLICY.hours).toEqual([7, 21]);
+  it('PJ_POLICY has hours [6, 22] (display range) and bookableDays 7', () => {
+    expect(PJ_POLICY.hours).toEqual([6, 22]);
     expect(PJ_POLICY.bookableDays).toBe(7);
     expect(PJ_POLICY.dailyMaxSlots).toBe(2);
     expect(PJ_POLICY.notes.length).toBeGreaterThan(0);
