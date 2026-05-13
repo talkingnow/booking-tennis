@@ -101,18 +101,26 @@ export async function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {})
         for (const [k, v] of Object.entries(kcp.fields)) searchParams.append(k, v);
         
         const res = await gyFetch(kcp.action, { method: 'POST', body: searchParams, cookie: c });
-        if (res.status === 200) {
-          const html = await res.text();
-          const innerForm = parseKcpForm(html);
-          if (innerForm && innerForm.action.includes('kcp.co.kr')) {
-            targetAction = innerForm.action;
-            targetFields = innerForm.fields;
-            debugLog('info', `KCP 2-hop success — submitting to smpay`);
-          } else {
-            debugLog('err', `KCP 2-hop failed — no inner KCP form found`);
-          }
+        const html = res.status === 200 ? await res.text() : '';
+        // Diagnostic: surface what /rsvPy actually returned so we can pick
+        // the right parsing strategy (form / JS / 302 redirect / error).
+        const formCount = (html.match(/<form\b/gi) || []).length;
+        const actions = Array.from(html.matchAll(/<form[^>]*action=["']([^"']+)["']/gi)).map((m) => m[1]).slice(0, 4);
+        const scriptHints = [
+          /KCP_Pay_Execute/i.test(html) ? 'KCP_Pay_Execute' : '',
+          /location\.href\s*=/i.test(html) ? 'location.href=' : '',
+          /window\.open/i.test(html) ? 'window.open' : '',
+          /smpay\.kcp\.co\.kr|spay\.kcp\.co\.kr/i.test(html) ? 'smpay-url' : '',
+        ].filter(Boolean);
+        debugLog('info', `2hop resp status=${res.status} loc=${res.location||'-'} htmlLen=${html.length} forms=${formCount} actions=${JSON.stringify(actions)} hints=${JSON.stringify(scriptHints)} head=${html.slice(0,160).replace(/\s+/g,' ')}`);
+
+        const innerForm = res.status === 200 ? parseKcpForm(html) : null;
+        if (innerForm && innerForm.action.includes('kcp.co.kr')) {
+          targetAction = innerForm.action;
+          targetFields = innerForm.fields;
+          debugLog('info', `KCP 2-hop success — submitting to smpay`);
         } else {
-          debugLog('err', `KCP 2-hop failed — status ${res.status}`);
+          debugLog('err', `KCP 2-hop failed — no inner KCP form found (innerAction=${innerForm?.action || 'none'})`);
         }
       }
     }
