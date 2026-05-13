@@ -10,7 +10,7 @@ import { getSite, isRegistered } from '@/lib/sites/registry';
 import { getCourt } from '@/lib/courts';
 import { formatRemaining, startCountdown, type CountdownHandle } from '@/lib/scheduler/countdown';
 import { measureServerOffsetMs } from '@/lib/scheduler/timeSync';
-import { openKcpPayment, isMobile } from '@/lib/payment/handoff';
+import { openKcpPayment } from '@/lib/payment/handoff';
 import { useUiStore } from '@/stores/uiStore';
 import type { KcpForm } from '@/lib/gytennis/types';
 
@@ -578,7 +578,7 @@ export default function Race() {
             <Button onClick={openPaymentPopup} className="w-full">
               결제창 열기 →
             </Button>
-            {!isMobile() && windowClosed && (
+            {windowClosed && (
               <p className="text-xs text-yellow-400">
                 결제창이 닫혔습니다. 결제창 열기를 다시 눌러 재시도하거나, 결제 완료 ✓를 누르세요.
               </p>

@@ -1,9 +1,6 @@
 import type { KcpForm } from '../gytennis/types';
 import type { SiteId } from '../sites/types';
 import { debugLog } from '@/components/DebugPanel';
-import { gyFetch } from '../gytennis/proxyClient';
-import { parseKcpForm } from '../parsers/kcpParser';
-import { useAuthStore } from '@/stores/authStore';
 
 export type KcpHandoffOptions = {
   /**
@@ -67,11 +64,11 @@ export function isStandalonePwa(): boolean {
 /**
  * Open the KCP payment window.
  *
- * Mobile: m_redirect_url redirect flow — form.submit() to KCP with m_redirect_url,
- * KCP redirects back to /payment-result after payment. No popup, no KCP SDK.
- *
- * PC: KCP_Pay_Execute popup flow — blob page loads payplus_web.jsp SDK and opens
- * the KCP payment popup. onWindowClosed fires when the popup is closed.
+ * Unified flow (PC + mobile): blob page loads payplus_web.jsp KCP SDK and
+ * calls KCP_Pay_Execute. SDK fills enc_info/enc_data via PG server and
+ * navigates to KCP payment page. onWindowClosed fires when the popup/tab
+ * is closed — mobile standalone PWAs open the blob in external Safari/Chrome,
+ * user returns to PWA after payment and confirms via "결제 완료" button.
  *
  * gytennis flow: /rsvConfirm → /rsvVf (already called) → KCP
  */
@@ -87,117 +84,10 @@ export async function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {})
     .map(([n, v]) => `<input type="hidden" name="${escAttr(n)}" value="${escAttr(v)}" />`)
     .join('\n');
 
-  if (isMobile()) {
-    let targetAction = action;
-    let targetFields = kcp.fields;
+  // (mobile uses the same PC blob+KCP SDK flow — no separate branch)
+  void siteId;
 
-    // ── 2-hop resolution: /rsvPy is gytennis intermediate, not KCP ───────
-    if (kcp.action.includes('/rsvPy') || !kcp.action.includes('kcp.co.kr')) {
-      debugLog('info', `KCP 2-hop start action=${kcp.action}`);
-      const siteIdToUse = siteId || 'gy';
-      const c = useAuthStore.getState().cookies[siteIdToUse];
-      if (c) {
-        const searchParams = new URLSearchParams();
-        for (const [k, v] of Object.entries(kcp.fields)) searchParams.append(k, v);
-        
-        const res = await gyFetch(kcp.action, { method: 'POST', body: searchParams, cookie: c });
-        const html = res.status === 200 ? await res.text() : '';
-        // Diagnostic: surface what /rsvPy actually returned so we can pick
-        // the right parsing strategy (form / JS / 302 redirect / error).
-        const formCount = (html.match(/<form\b/gi) || []).length;
-        const actions = Array.from(html.matchAll(/<form[^>]*action=["']([^"']+)["']/gi)).map((m) => m[1]).slice(0, 4);
-        const scriptHints = [
-          /KCP_Pay_Execute/i.test(html) ? 'KCP_Pay_Execute' : '',
-          /location\.href\s*=/i.test(html) ? 'location.href=' : '',
-          /window\.open/i.test(html) ? 'window.open' : '',
-          /smpay\.kcp\.co\.kr|spay\.kcp\.co\.kr/i.test(html) ? 'smpay-url' : '',
-        ].filter(Boolean);
-        // Capture hidden inputs from each <form> so we can see what state /rsvPy
-        // exposes (e.g. enc_info filled or empty, ordr_idxx echo, etc.).
-        const inputDumps = Array.from(html.matchAll(/<form[\s\S]*?<\/form>/gi)).map((fm) => {
-          const inputs = Array.from((fm[0] || '').matchAll(/<input[^>]*name=["']([^"']+)["'][^>]*?(?:value=["']([^"']*)["'])?/gi))
-            .map((im) => `${im[1]}=${(im[2]||'').length}b`).slice(0, 20).join(',');
-          return inputs;
-        });
-        const scripts = Array.from(html.matchAll(/<script[^>]*(?:src=["']([^"']+)["'])?[^>]*>([\s\S]{0,200}?)<\/script>/gi))
-          .map((sm) => sm[1] ? `src:${sm[1]}` : `inline:${(sm[2]||'').replace(/\s+/g,' ').slice(0,120)}`).slice(0, 6);
-        debugLog('info', `2hop resp status=${res.status} loc=${res.location||'-'} htmlLen=${html.length} forms=${formCount} actions=${JSON.stringify(actions)} hints=${JSON.stringify(scriptHints)} inputs=${JSON.stringify(inputDumps)} scripts=${JSON.stringify(scripts)}`);
-        debugLog('info', `2hop body[0..2400]=${html.slice(0,2400).replace(/\s+/g,' ')}`);
-
-        const innerForm = res.status === 200 ? parseKcpForm(html) : null;
-        if (innerForm && innerForm.action.includes('kcp.co.kr')) {
-          targetAction = innerForm.action;
-          targetFields = innerForm.fields;
-          debugLog('info', `KCP 2-hop success — submitting to smpay`);
-        } else {
-          debugLog('err', `KCP 2-hop failed — no inner KCP form found (innerAction=${innerForm?.action || 'none'})`);
-        }
-      }
-    }
-
-    // ── Mobile: current-tab POST → KCP mobile page (M-V2-a) ──────────────
-    const orderId = targetFields.ordr_idxx ?? '';
-    const siteQuery = siteId ? `&site=${encodeURIComponent(siteId)}` : '';
-    const redirectUrl = `${location.origin}/payment-result?order_id=${encodeURIComponent(orderId)}${siteQuery}`;
-
-    // M-V1: spay.kcp.co.kr → mobile-spay.kcp.co.kr
-    const mobileAction = toMobileAction(targetAction);
-
-    // M-V2-a: standalone PWA uses target=_blank to escape in-app overlay.
-    const form = document.createElement('form');
-    form.method = 'post';
-    form.action = mobileAction;
-    form.acceptCharset = 'UTF-8';
-
-    // Redirect-related fields from gytennis's rsvConfirm form must be stripped
-    // and replaced with our own m_redirect_url. If gytennis's URL reaches KCP,
-    // the browser is sent to gytennis.or.kr/ordrErr (no session cookie → 예약 만료).
-    const REDIRECT_FIELDS = new Set([
-      'm_redirect_url', 'Ret_URL', 'ret_url', 'RETURN_URL', 'return_url',
-      'callback_url', 'noti_url', 'KCPRedirectURL',
-      'returnUrl', 'ReturnUrl', 'retUrl', 'complete_url', 'CompleteUrl',
-      'success_url', 'SuccessUrl', 'fail_url', 'FailUrl',
-      'm_signal_url', 'notice_url', 'NoticeUrl', 'redirect_url', 'RedirectURL',
-    ]);
-
-    const addField = (name: string, value: string) => {
-      const inp = document.createElement('input');
-      inp.type = 'hidden'; inp.name = name; inp.value = value;
-      form.appendChild(inp);
-    };
-
-    const strippedNames: string[] = [];
-    for (const [n, v] of Object.entries(targetFields)) {
-      if (REDIRECT_FIELDS.has(n)) { strippedNames.push(n); continue; }
-      addField(n, v);
-    }
-    addField('m_redirect_url', redirectUrl);
-    if (!targetFields.pay_method) addField('pay_method', '100000000000');
-
-    const standalone = isStandalonePwa();
-    if (standalone) form.target = '_blank';
-
-    // Full payload dump for qa live capture via chrome-devtools MCP
-    const formInputs = Array.from(form.elements) as HTMLInputElement[];
-    debugLog('info', `KCP mobile payload ${JSON.stringify({
-      action: mobileAction,
-      redirect: redirectUrl,
-      standalone,
-      ua: navigator.userAgent.slice(0, 80),
-      origin: location.origin,
-      referrer: document.referrer || '(none)',
-      fields: formInputs.map((el) => `${el.name}=${String(el.value).length}b`),
-      strippedRedirect: strippedNames,
-    })}`);
-
-    document.body.appendChild(form);
-    form.submit();
-    document.body.removeChild(form);
-
-    return null;
-  }
-
-  // ── PC: KCP_Pay_Execute popup flow ────────────────────────────────────────
+  // ── Unified: blob page + KCP_Pay_Execute SDK ─────────────────────────────
   const pageHtml = `<!DOCTYPE html>
 <html lang="ko">
 <head>
