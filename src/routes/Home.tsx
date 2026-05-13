@@ -1,16 +1,28 @@
 import { Link } from 'react-router-dom';
 import { useSiteStore } from '@/stores/siteStore';
+import { useUiStore } from '@/stores/uiStore';
 import { isRegistered, getSite } from '@/lib/sites/registry';
 import { LoginBadge } from '@/components/LoginBadge';
 
 export default function Home() {
   const { activeSiteId } = useSiteStore();
+  const bootAutoLogin = useUiStore((s) => s.bootAutoLogin);
   const siteName = isRegistered(activeSiteId)
     ? getSite(activeSiteId).config.name
     : activeSiteId === 'pj' ? '파주시' : '고양시';
 
   return (
     <div className="space-y-4">
+      {!bootAutoLogin && (
+        <section className="rounded-xl bg-amber-950/40 border border-amber-700/60 px-4 py-3 text-xs text-amber-200 flex items-start gap-2">
+          <span aria-hidden>⚠️</span>
+          <div className="flex-1">
+            <div className="font-semibold mb-0.5">구동 시 자동 로그인이 꺼져 있습니다</div>
+            <div className="text-amber-300/80">앱을 다시 켤 때 로그인 시도를 하지 않습니다. <Link to="/account" className="underline">계정 설정</Link> 에서 켜세요.</div>
+          </div>
+        </section>
+      )}
+
       <section className="rounded-2xl bg-panel p-5">
         <h2 className="text-base font-semibold mb-3">로그인 상태</h2>
         <div className="space-y-2">
