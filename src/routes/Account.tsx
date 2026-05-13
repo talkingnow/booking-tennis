@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useSiteStore } from '@/stores/siteStore';
+import { useUiStore } from '@/stores/uiStore';
 import { Card, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
 
@@ -8,6 +9,8 @@ export default function Account() {
   const { accounts, cookies, busy, error, hydrate, saveCredentials, doLogin, doLogout, forget } =
     useAuthStore();
   const { activeSiteId } = useSiteStore();
+  const bootAutoLogin = useUiStore((s) => s.bootAutoLogin);
+  const setBootAutoLogin = useUiStore((s) => s.setBootAutoLogin);
 
   const account = accounts[activeSiteId] ?? null;
   const cookie = cookies[activeSiteId] ?? null;
@@ -107,6 +110,24 @@ export default function Account() {
           </div>
         </Card>
       )}
+
+      <Card>
+        <CardTitle>일반 설정</CardTitle>
+        <label className="flex items-start gap-3 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={bootAutoLogin}
+            onChange={(e) => setBootAutoLogin(e.target.checked)}
+            className="mt-1"
+          />
+          <div className="flex-1">
+            <div>구동 시 자동 로그인</div>
+            <div className="text-xs text-slate-400 mt-0.5">
+              앱을 켤 때 저장된 계정으로 자동 로그인합니다. 끄면 [계정 설정] 의 로그인 버튼을 직접 눌러야 합니다. (기본 꺼짐)
+            </div>
+          </div>
+        </label>
+      </Card>
 
       <Card>
         <CardTitle>보안 안내</CardTitle>

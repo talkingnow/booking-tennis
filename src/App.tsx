@@ -9,6 +9,7 @@ import { SiteSelector } from './components/SiteSelector';
 import { DebugPanel } from './components/DebugPanel';
 import { useSiteStore } from './stores/siteStore';
 import { useAuthStore } from './stores/authStore';
+import { useUiStore } from './stores/uiStore';
 
 export default function App() {
   const loc = useLocation();
@@ -16,13 +17,14 @@ export default function App() {
   const { hydrate: hydrateSite } = useSiteStore();
   const { hydrate: hydrateAuth, validateAndLogin, startKeepAlive, stopKeepAlive } = useAuthStore();
 
-  // Hydrate stores and boot-time session validation on mount
+  // Hydrate stores; boot-time auto-login only when user opted in
   useEffect(() => {
     hydrateSite();
     hydrateAuth();
-    // Fire-and-forget: validate/restore sessions for all configured sites
-    validateAndLogin('gy');
-    validateAndLogin('pj');
+    if (useUiStore.getState().bootAutoLogin) {
+      validateAndLogin('gy');
+      validateAndLogin('pj');
+    }
     startKeepAlive();
     return () => { stopKeepAlive(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
