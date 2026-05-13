@@ -13,9 +13,12 @@ export type SiteAuthMeta = {
   lastError?: string;
 };
 
+// Stable reference — must NOT be recreated each call, or zustand sees a fresh
+// snapshot every render and triggers React error #185 (infinite loop).
+const IDLE_META: SiteAuthMeta = { lastValidatedAt: null, lastResult: 'idle' };
+
 export function selectMeta(siteId: SiteId) {
-  return (s: AuthState): SiteAuthMeta =>
-    s.meta[siteId] ?? { lastValidatedAt: null, lastResult: 'idle' };
+  return (s: AuthState): SiteAuthMeta => s.meta[siteId] ?? IDLE_META;
 }
 
 type AuthState = {
