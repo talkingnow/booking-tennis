@@ -45,3 +45,4 @@
 | 2026-05-12 | KCP 결제창 모바일 리다이렉트(방안 A) — isMobile() 분기, m_redirect_url, /payment-result 콜백 라우트 신규 | 02_plan_kcp_mobile.md |
 | 2026-05-12 | 4종 개선: doLogin promise 공유(중복방지), 결제중 슬롯 반영(payment_in_progress), PWA 상단 safe-area-inset-top, Quick 자동조회 제거 | |
 | 2026-05-12 | 파주시테니스협회 멀티사이트 확장 (M0~M8) — SiteAdapter 추상화, /api/pj 프록시, 파주 12코트 55면, SiteSelector UI, storage 격리, Race 금요일 07:00 prefill | 02_plan_paju.md / 01_recon_paju.md / 06_qa_report_paju.md |
+| 2026-05-13 | qa × agent-browser 통합 — `.claude/agents/qa.md` 를 chrome-devtools MCP 기반으로 개정, 검증 파이프라인 4→6단계 확장(S4 자동 브라우저 운전 추가), 모바일 viewport·KCP 핸드오프·세션만료 8종 시나리오 명문화 | 05_session_handoff_qa_browser.md / MCP: `claude mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest` |
