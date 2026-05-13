@@ -107,3 +107,35 @@ describe('submitReservation — verifyReservation integration (M-C)', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });
+
+describe('classifyError — payment_in_progress 패턴 매칭', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  const failHtml = (msg: string) =>
+    `<html><body><script>swal("${msg}")</script></body></html>`;
+
+  const cases: [string, string][] = [
+    ['결제중', '결제중 (3자)'],
+    ['결제 진행 중', '결제 진행 중 (공백 포함)'],
+    ['결제진행중', '결제진행중 (공백 없음)'],
+  ];
+
+  for (const [text, label] of cases) {
+    it(`"${label}" → payment_in_progress`, async () => {
+      mockFetch.mockResolvedValueOnce({
+        status: 200,
+        text: async () => failHtml(text),
+        location: undefined,
+      });
+
+      const result = await submitReservation([sampleSlot], 'test-cookie');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe('payment_in_progress');
+      }
+    });
+  }
+});

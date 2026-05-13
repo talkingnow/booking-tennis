@@ -74,6 +74,6 @@ function classifyError(html: string): ReservationResult extends { ok: false; rea
   if (/일일\s*\d+\s*시간\s*이내/.test(html)) return 'daily_limit' as never;
   if (/예약\s*\d+\s*코트\s*이내/.test(html)) return 'per_court_limit' as never;
   if (/이미\s*예약|선점|마감/.test(html)) return 'already_taken' as never;
-  if (/결제\s*진행\s*중/.test(html)) return 'payment_in_progress' as never;
+  if (/결제\s*(진행\s*)?중/.test(html)) return 'payment_in_progress' as never;
   return 'unknown' as never;
 }
