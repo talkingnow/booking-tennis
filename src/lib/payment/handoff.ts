@@ -105,9 +105,13 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
     // Redirect-related fields from gytennis's rsvConfirm form must be stripped
     // and replaced with our own m_redirect_url. If gytennis's URL reaches KCP,
     // the browser is sent to gytennis.or.kr/ordrErr (no session cookie → 예약 만료).
+    // Extended set covers all known case variants (KCP and gytennis are case-sensitive).
     const REDIRECT_FIELDS = new Set([
       'm_redirect_url', 'Ret_URL', 'ret_url', 'RETURN_URL', 'return_url',
       'callback_url', 'noti_url', 'KCPRedirectURL',
+      'returnUrl', 'ReturnUrl', 'retUrl', 'complete_url', 'CompleteUrl',
+      'success_url', 'SuccessUrl', 'fail_url', 'FailUrl',
+      'm_signal_url', 'notice_url', 'NoticeUrl', 'redirect_url', 'RedirectURL',
     ]);
 
     const addField = (name: string, value: string) => {
@@ -116,8 +120,9 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
       form.appendChild(inp);
     };
 
+    const strippedNames: string[] = [];
     for (const [n, v] of Object.entries(kcp.fields)) {
-      if (REDIRECT_FIELDS.has(n)) continue;
+      if (REDIRECT_FIELDS.has(n)) { strippedNames.push(n); continue; }
       addField(n, v);
     }
     addField('m_redirect_url', redirectUrl);
@@ -126,8 +131,20 @@ export function openKcpPayment(kcp: KcpForm, opts: KcpHandoffOptions = {}): Wind
     const standalone = isStandalonePwa();
     if (standalone) form.target = '_blank';
 
+    // Full payload dump for qa live capture via chrome-devtools MCP
+    const formInputs = Array.from(form.elements) as HTMLInputElement[];
+    debugLog('info', `KCP mobile payload ${JSON.stringify({
+      action: mobileAction,
+      redirect: redirectUrl,
+      standalone,
+      ua: navigator.userAgent.slice(0, 80),
+      origin: location.origin,
+      referrer: document.referrer || '(none)',
+      fields: formInputs.map((el) => `${el.name}=${String(el.value).length}b`),
+      strippedRedirect: strippedNames,
+    })}`);
+
     document.body.appendChild(form);
-    debugLog('info', `KCP mobile (M-V1+V2a) action=${mobileAction} redirect=${redirectUrl} standalone=${standalone}`);
     form.submit();
     document.body.removeChild(form);
 

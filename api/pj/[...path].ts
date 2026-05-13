@@ -70,17 +70,25 @@ export default async function handler(req: Request): Promise<Response> {
     }
     fwd.set(k, v);
   }
-  // Always identify as a normal browser
-  if (!fwd.has('user-agent')) {
-    fwd.set(
-      'user-agent',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    );
-  }
-  fwd.set('Accept-Language', 'ko-KR,ko;q=0.9');
+  // Full Chrome browser header set — WAF fingerprint evasion (H3 hypothesis)
+  fwd.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+  fwd.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8');
+  fwd.set('Accept-Language', 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7');
+  fwd.set('Accept-Encoding', 'gzip, deflate, br');
+  fwd.set('Cache-Control', 'no-cache');
+  fwd.set('Pragma', 'no-cache');
+  fwd.set('Sec-Ch-Ua', '"Chromium";v="131", "Not_A Brand";v="24"');
+  fwd.set('Sec-Ch-Ua-Mobile', '?0');
+  fwd.set('Sec-Ch-Ua-Platform', '"Windows"');
+  fwd.set('Sec-Fetch-Dest', 'document');
+  fwd.set('Sec-Fetch-Mode', 'navigate');
+  fwd.set('Sec-Fetch-Site', 'same-origin');
+  fwd.set('Sec-Fetch-User', '?1');
+  fwd.set('Upgrade-Insecure-Requests', '1');
   // Always spoof Referer/Origin to pjtennis for all POST requests.
   if (req.method === 'POST') {
-    fwd.set('Referer', UPSTREAM + '/daily');
+    fwd.set('Content-Type', 'application/x-www-form-urlencoded');
+    fwd.set('Referer', UPSTREAM + '/');
     fwd.set('Origin', UPSTREAM);
   }
 
@@ -96,46 +104,55 @@ export default async function handler(req: Request): Promise<Response> {
       msg.includes('network') || msg.includes('abort');
   }
 
-  function diagErr(e: unknown) {
+  function diagErr(e: unknown, elapsedMs: number) {
     return {
       name: (e as any)?.name,
       message: String((e as any)?.message ?? e),
       cause: String((e as any)?.cause ?? ''),
+      causeName: (e as any)?.cause?.name ?? null,
+      causeCode: (e as any)?.cause?.code ?? null,
       stack: (e as any)?.stack?.split('\n').slice(0, 3).join(' | '),
+      elapsedMs,
+      edgeRegion: (typeof process !== 'undefined' && process.env?.VERCEL_REGION) ?? 'unknown',
+      timestamp: new Date().toISOString(),
     };
   }
 
   let upstreamRes: Response;
+  const t0 = Date.now();
   try {
     upstreamRes = await fetch(upstream, {
       method: req.method,
       headers: fwd,
       body,
       redirect: 'manual',
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(15000),
     });
   } catch (e) {
-    console.error('upstream fail', { ...diagErr(e), upstream });
+    const elapsed = Date.now() - t0;
+    console.error('upstream fail', { ...diagErr(e, elapsed), upstream });
     if (!isTransientError(e)) {
       return new Response(
-        JSON.stringify({ error: 'upstream_unreachable', ...diagErr(e) }),
+        JSON.stringify({ error: 'upstream_unreachable', ...diagErr(e, elapsed) }),
         { status: 502, headers: { 'content-type': 'application/json' } },
       );
     }
-    // 1 retry on transient errors (200ms delay)
+    // 1 retry on transient errors (200ms delay, shorter 8s timeout)
     await new Promise((r) => setTimeout(r, 200));
+    const t1 = Date.now();
     try {
       upstreamRes = await fetch(upstream, {
         method: req.method,
         headers: fwd,
         body,
         redirect: 'manual',
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(8000),
       });
     } catch (e2) {
-      console.error('upstream fail retry', { ...diagErr(e2), upstream });
+      const elapsed2 = Date.now() - t1;
+      console.error('upstream fail retry', { ...diagErr(e2, elapsed2), upstream });
       return new Response(
-        JSON.stringify({ error: 'upstream_unreachable', ...diagErr(e2) }),
+        JSON.stringify({ error: 'upstream_unreachable', ...diagErr(e2, elapsed2) }),
         { status: 502, headers: { 'content-type': 'application/json' } },
       );
     }
