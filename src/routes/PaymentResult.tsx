@@ -7,7 +7,7 @@ import { isRegistered, getSite } from '@/lib/sites/registry';
 import { useSiteStore } from '@/stores/siteStore';
 import type { SiteId } from '@/lib/sites/types';
 
-type ResultState = 'pending' | 'success' | 'failure' | 'cancelled' | 'invalid';
+type ResultState = 'pending' | 'success' | 'failure' | 'cancelled' | 'invalid' | 'no_response';
 
 export default function PaymentResult() {
   const [params] = useSearchParams();
@@ -38,6 +38,12 @@ export default function PaymentResult() {
 
     if (!orderId) {
       setState('invalid');
+      return;
+    }
+
+    // No KCP params at all — KCP never redirected back (e.g. ordrErr before KCP entry)
+    if (!resCd && !params.get('pay_method') && !params.get('enc_info')) {
+      setState('no_response');
       return;
     }
 
@@ -98,6 +104,28 @@ export default function PaymentResult() {
         <Link to="/">
           <Button>홈으로</Button>
         </Link>
+      </Card>
+    );
+  }
+
+  if (state === 'no_response') {
+    return (
+      <Card className="border border-yellow-700">
+        <CardTitle>결제창 진입 실패</CardTitle>
+        <p className="text-sm text-yellow-300 mb-3">
+          결제창이 열리지 않고 만료 페이지로 이동했을 수 있습니다.
+        </p>
+        <p className="text-xs text-slate-400 mb-4">
+          모바일에서 '결제 정보가 만료되었습니다' 화면이 보이면, <strong className="text-slate-200">PC 브라우저</strong>에서 동일 계정으로 로그인 후 같은 즐겨찾기로 재시도해 주세요. KCP 측 모바일 결제 정책에 따라 일부 환경에서 결제창이 정상 표시되지 않을 수 있습니다.
+        </p>
+        <div className="flex gap-2">
+          <Link to="/quick">
+            <Button>즐겨찾기로</Button>
+          </Link>
+          <Link to="/">
+            <Button variant="secondary">홈으로</Button>
+          </Link>
+        </div>
       </Card>
     );
   }

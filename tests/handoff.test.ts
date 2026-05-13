@@ -122,6 +122,91 @@ describe('openKcpPayment mobile — redirect field 처리', () => {
   });
 });
 
+describe('openKcpPayment mobile — 확장 REDIRECT_FIELDS strip (A1)', () => {
+  let capturedForm: HTMLFormElement | null = null;
+
+  beforeEach(() => {
+    capturedForm = null;
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+      maxTouchPoints: 5,
+    });
+    vi.stubGlobal('location', { origin: 'https://booking.example.com' });
+    vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function(this: HTMLFormElement) {
+      capturedForm = this.cloneNode(true) as HTMLFormElement;
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.querySelectorAll('form').forEach(f => f.remove());
+  });
+
+  it('확장 redirect 변형 필드 모두 제거 (returnUrl, SuccessUrl, RedirectURL 등)', () => {
+    const extendedFields: Record<string, string> = {
+      site_cd: 'X0001',
+      ordr_idxx: 'ORDER-EXT',
+      returnUrl: 'https://www.gytennis.or.kr/r1',
+      ReturnUrl: 'https://www.gytennis.or.kr/r2',
+      retUrl: 'https://www.gytennis.or.kr/r3',
+      complete_url: 'https://www.gytennis.or.kr/c1',
+      CompleteUrl: 'https://www.gytennis.or.kr/c2',
+      success_url: 'https://www.gytennis.or.kr/s1',
+      SuccessUrl: 'https://www.gytennis.or.kr/s2',
+      fail_url: 'https://www.gytennis.or.kr/f1',
+      FailUrl: 'https://www.gytennis.or.kr/f2',
+      m_signal_url: 'https://www.gytennis.or.kr/sig',
+      notice_url: 'https://www.gytennis.or.kr/notice',
+      NoticeUrl: 'https://www.gytennis.or.kr/Notice',
+      redirect_url: 'https://www.gytennis.or.kr/redir',
+      RedirectURL: 'https://www.gytennis.or.kr/RedirURL',
+    };
+    openKcpPayment({ action: 'https://spay.kcp.co.kr/pay.do', fields: extendedFields });
+    expect(capturedForm).not.toBeNull();
+    const names = Array.from(capturedForm!.querySelectorAll('input[type=hidden]')).map(i => (i as HTMLInputElement).name);
+    const stripped = [
+      'returnUrl','ReturnUrl','retUrl','complete_url','CompleteUrl',
+      'success_url','SuccessUrl','fail_url','FailUrl',
+      'm_signal_url','notice_url','NoticeUrl','redirect_url','RedirectURL',
+    ];
+    for (const field of stripped) {
+      expect(names, `"${field}" should be stripped`).not.toContain(field);
+    }
+    // Our m_redirect_url is injected
+    expect(names).toContain('m_redirect_url');
+    const redir = capturedForm!.querySelector('input[name="m_redirect_url"]') as HTMLInputElement;
+    expect(redir.value).toContain('/payment-result');
+    expect(redir.value).toContain('ORDER-EXT');
+  });
+
+  it('m_redirect_url 단일 값으로 덮어쓰기 — 원본 gytennis URL 없음', () => {
+    openKcpPayment({
+      action: 'https://spay.kcp.co.kr/pay.do',
+      fields: {
+        site_cd: 'Y0001',
+        ordr_idxx: 'ORD-OVER',
+        m_redirect_url: 'https://www.gytennis.or.kr/MUST_BE_GONE',
+      },
+    });
+    expect(capturedForm).not.toBeNull();
+    const redirectInputs = Array.from(capturedForm!.querySelectorAll('input[name="m_redirect_url"]')) as HTMLInputElement[];
+    expect(redirectInputs).toHaveLength(1);
+    expect(redirectInputs[0].value).not.toContain('gytennis');
+    expect(redirectInputs[0].value).toContain('payment-result');
+  });
+
+  it('pay_method 미입력 시 기본값 100000000000 폴백 유지', () => {
+    openKcpPayment({
+      action: 'https://spay.kcp.co.kr/pay.do',
+      fields: { site_cd: 'Z0001', ordr_idxx: 'ORD-PM' },
+    });
+    expect(capturedForm).not.toBeNull();
+    const pm = capturedForm!.querySelector('input[name="pay_method"]') as HTMLInputElement | null;
+    expect(pm?.value).toBe('100000000000');
+  });
+});
+
 describe('isStandalonePwa', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
