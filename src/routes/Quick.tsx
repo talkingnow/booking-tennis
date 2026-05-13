@@ -8,7 +8,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useFavoritesStore } from '@/stores/favoritesStore';
 import { useSiteStore } from '@/stores/siteStore';
 import { getSite, isRegistered } from '@/lib/sites/registry';
-import { openKcpPayment } from '@/lib/payment/handoff';
+import { openKcpPayment, isMobile } from '@/lib/payment/handoff';
 import { courtName } from '@/lib/courts';
 import { SlotGrid } from '@/components/SlotGrid';
 import type { DailyView, Slot, KcpForm } from '@/lib/gytennis/types';
@@ -121,7 +121,7 @@ export default function Quick() {
       const orderId = result.orderId!;
       payConfirmedRef.current = false;
       setPendingSlots((prev) => new Set([...prev, s.raw]));
-      setKcpReady({ orderId, kcp: result.kcp, slotRaw: s.raw });
+      if (!isMobile()) setKcpReady({ orderId, kcp: result.kcp, slotRaw: s.raw });
       openKcpPayment(result.kcp, {
         siteId: activeSiteId,
         onWindowClosed: async () => {

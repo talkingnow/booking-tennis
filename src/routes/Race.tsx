@@ -10,7 +10,7 @@ import { getSite, isRegistered } from '@/lib/sites/registry';
 import { getCourt } from '@/lib/courts';
 import { formatRemaining, startCountdown, type CountdownHandle } from '@/lib/scheduler/countdown';
 import { measureServerOffsetMs } from '@/lib/scheduler/timeSync';
-import { openKcpPayment } from '@/lib/payment/handoff';
+import { openKcpPayment, isMobile } from '@/lib/payment/handoff';
 import { useUiStore } from '@/stores/uiStore';
 import type { KcpForm } from '@/lib/gytennis/types';
 
@@ -224,7 +224,7 @@ export default function Race() {
     if (!prioritiesRef.current.length)
       return setError('우선순위를 1개 이상 입력하세요.');
     if (targetMs - Date.now() < 1_000)
-      return setError('발사 시각이 너무 가깝거나 이미 지났습니다.');
+      return setError('예약 시각이 너무 가깝거나 이미 지났습니다.');
     setError(null);
     cascadeIdxRef.current = 0;
     cascadeResultsRef.current = [];
@@ -383,7 +383,7 @@ export default function Race() {
           <Card>
             <CardTitle>우선순위 목록</CardTitle>
             <p className="text-xs text-slate-400 mb-3">
-              발사 시각에 슬롯을 조회하여 위 순서대로 예약합니다. 결제 완료 ✓ 또는 예약 실패 시 다음 순위로 자동 진행합니다.
+              예약 시각에 슬롯을 조회하여 위 순서대로 예약합니다. 결제 완료 ✓ 또는 예약 실패 시 다음 순위로 자동 진행합니다.
             </p>
 
             {priorities.length === 0 && (
@@ -474,12 +474,27 @@ export default function Race() {
 
           {/* Fire time */}
           <Card>
-            <CardTitle>2. 발사 시각</CardTitle>
-            <input
-              type="datetime-local" value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
-            />
+            <CardTitle>2. 예약 시각</CardTitle>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">날짜</label>
+                <input
+                  type="date"
+                  value={target.slice(0, 10)}
+                  onChange={(e) => setTarget(e.target.value + target.slice(10))}
+                  className="block w-full min-w-0 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">시각</label>
+                <input
+                  type="time"
+                  value={target.slice(11)}
+                  onChange={(e) => setTarget(target.slice(0, 11) + e.target.value)}
+                  className="block w-full min-w-0 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
+                />
+              </div>
+            </div>
             <p className="text-xs text-slate-500 mt-2">{openDateNote}</p>
           </Card>
 
@@ -493,7 +508,7 @@ export default function Race() {
             onClick={arm}
             disabled={!cookie || !priorities.length}
           >
-            ⏱ 발사 대기
+            ⏱ 예약 대기
           </Button>
         </>
       )}
@@ -501,12 +516,12 @@ export default function Race() {
       {/* ── ARMED ──────────────────────────────────────────────────────────── */}
       {phase === 'armed' && (
         <Card className="text-center py-12">
-          <p className="text-sm text-slate-400 mb-2">발사까지</p>
+          <p className="text-sm text-slate-400 mb-2">예약까지</p>
           <p className="text-5xl font-mono tabular-nums text-accent">
             {remaining != null ? formatRemaining(remaining) : '--:--.---'}
           </p>
           <p className="text-xs text-yellow-400 mt-3">
-            발사 시 슬롯 조회 → 우선순위 순 자동 예약 ({priorities.length}개)
+            예약 시각에 슬롯 조회 → 우선순위 순 자동 예약 ({priorities.length}개)
           </p>
           <p className="text-xs text-slate-500 mt-4">앱을 닫지 마세요. 화면 자동 꺼짐 방지 권장.</p>
           <div className="mt-6">
@@ -539,7 +554,7 @@ export default function Race() {
             <Button onClick={openPaymentPopup} className="w-full">
               결제창 열기 →
             </Button>
-            {windowClosed && (
+            {!isMobile() && windowClosed && (
               <p className="text-xs text-yellow-400">
                 결제창이 닫혔습니다. 결제창 열기를 다시 눌러 재시도하거나, 결제 완료 ✓를 누르세요.
               </p>
@@ -587,7 +602,7 @@ export default function Race() {
       {/* ── CASCADE DONE ───────────────────────────────────────────────────── */}
       {phase === 'cascade-done' && (
         <Card>
-          <CardTitle>📋 발사 완료</CardTitle>
+          <CardTitle>📋 예약 완료</CardTitle>
           <div className="space-y-1 mb-4">
             {cascadeResults.map((r, i) => {
               const court = getCourt(activeSiteId, r.entry.courtId);

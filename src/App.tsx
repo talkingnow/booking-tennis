@@ -42,6 +42,8 @@ export default function App() {
       </main>
       <footer className="px-4 py-3 text-center text-xs text-slate-500 border-t border-slate-800">
         gytennis · pjtennis unofficial client · v0.2.0
+        <br />
+        made by hyun-seo
       </footer>
     </div>
   );

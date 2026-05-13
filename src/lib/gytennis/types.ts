@@ -88,6 +88,7 @@ export type ReservationResult =
         | 'already_taken'
         | 'daily_limit'
         | 'per_court_limit'
+        | 'payment_in_progress'
         | 'unknown';
       detail?: string;
     };

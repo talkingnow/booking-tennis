@@ -51,17 +51,21 @@ export async function submitReservation(
   return { ok: false, reason };
 }
 
+// Both rsvVf and rsvCls are XHR endpoints — gytennis checks this header.
+const XHR_HEADERS = { 'X-Requested-With': 'XMLHttpRequest' };
+
 /** Verify a reservation right after /rsvConfirm. (gytennis XHR pre-payment) */
 export async function verifyReservation(orderId: string, cookie: string): Promise<boolean> {
   const body = new URLSearchParams({ id: orderId });
-  const res = await gyFetch('/rsvVf', { method: 'POST', body, cookie });
+  const res = await gyFetch('/rsvVf', { method: 'POST', body, cookie, headers: XHR_HEADERS });
+  debugLog(res.status === 200 ? 'info' : 'err', `rsvVf status=${res.status}`);
   return res.status === 200;
 }
 
 /** Release a reserved-but-unpaid slot. Called when the user cancels payment. */
 export async function cancelReservation(orderId: string, cookie: string): Promise<boolean> {
   const body = new URLSearchParams({ id: orderId });
-  const res = await gyFetch('/rsvCls', { method: 'POST', body, cookie });
+  const res = await gyFetch('/rsvCls', { method: 'POST', body, cookie, headers: XHR_HEADERS });
   return res.status === 200;
 }
 
@@ -70,5 +74,6 @@ function classifyError(html: string): ReservationResult extends { ok: false; rea
   if (/일일\s*\d+\s*시간\s*이내/.test(html)) return 'daily_limit' as never;
   if (/예약\s*\d+\s*코트\s*이내/.test(html)) return 'per_court_limit' as never;
   if (/이미\s*예약|선점|마감/.test(html)) return 'already_taken' as never;
+  if (/결제\s*진행\s*중/.test(html)) return 'payment_in_progress' as never;
   return 'unknown' as never;
 }
