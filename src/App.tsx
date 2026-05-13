@@ -24,6 +24,10 @@ export default function App() {
     if (useUiStore.getState().bootAutoLogin) {
       validateAndLogin('gy');
       validateAndLogin('pj');
+    } else {
+      // Auto-login OFF: drop any restored session so UI reflects "logged out".
+      // localStorage cookies are preserved — toggling ON re-validates them.
+      useAuthStore.setState({ cookies: {} });
     }
     startKeepAlive();
     return () => { stopKeepAlive(); };

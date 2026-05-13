@@ -21,7 +21,7 @@ export function debugLog(type: LogEntry['type'], msg: string) {
 
 export function DebugPanel() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [visible, setVisible] = useState(true);
+  const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
