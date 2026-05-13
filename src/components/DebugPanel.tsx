@@ -51,6 +51,13 @@ export function DebugPanel() {
         <span className="text-slate-400 font-bold">DEBUG LOG</span>
         <div className="flex gap-2">
           <button onClick={() => setLogs([])} className="text-slate-500 hover:text-white">clear</button>
+          <button
+            onClick={() => {
+              const text = logs.map((e) => `${e.ts} [${e.type}] ${e.msg}`).join('\n');
+              navigator.clipboard.writeText(text).catch(() => {});
+            }}
+            className="text-slate-500 hover:text-white"
+          >복사</button>
           <button onClick={() => setVisible(false)} className="text-slate-500 hover:text-white">hide</button>
         </div>
       </div>

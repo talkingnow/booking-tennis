@@ -46,9 +46,10 @@ export function SlotPicker({ slots, selected, onToggle, siteId = 'gy', hours }: 
   const hourBuckets = useMemo(() => {
     if (hours?.length) return hours;
     if (isRegistered(siteId)) {
-      const [s, e] = getSite(siteId).config.policy.hours;
+      const { hours: [s, e], hourStep = 1 } = getSite(siteId).config.policy;
       const out: number[] = [];
-      for (let h = s; h < e; h++) out.push(h);
+      const first = hourStep === 1 ? s : Math.ceil(s / hourStep) * hourStep;
+      for (let h = first; h < e; h += hourStep) out.push(h);
       return out;
     }
     return Array.from(new Set(slots.map((x) => x.hour))).sort((a, b) => a - b);

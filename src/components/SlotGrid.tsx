@@ -61,9 +61,11 @@ export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set
   const slotHours = useMemo(() => {
     if (hours?.length) return hours;
     if (isRegistered(siteId)) {
-      const [s, e] = getSite(siteId).config.policy.hours;
+      const { hours: [s, e], hourStep = 1 } = getSite(siteId).config.policy;
       const out: number[] = [];
-      for (let h = s; h < e; h++) out.push(h);
+      // Align start to the next multiple of hourStep (e.g. GY: start=5 step=2 → first=6)
+      const first = hourStep === 1 ? s : Math.ceil(s / hourStep) * hourStep;
+      for (let h = first; h < e; h += hourStep) out.push(h);
       return out;
     }
     return Array.from(new Set(slots.map((x) => x.hour))).sort((a, b) => a - b);
