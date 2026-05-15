@@ -7,6 +7,7 @@ import { PolicyNotice } from '@/components/PolicyNotice';
 import { useAuthStore } from '@/stores/authStore';
 import { useFavoritesStore } from '@/stores/favoritesStore';
 import { useSiteStore } from '@/stores/siteStore';
+import { useUiStore } from '@/stores/uiStore';
 import { getSite, isRegistered } from '@/lib/sites/registry';
 import { openKcpPayment, isMobile } from '@/lib/payment/handoff';
 import { courtName } from '@/lib/courts';
@@ -14,7 +15,7 @@ import { SlotGrid } from '@/components/SlotGrid';
 import type { DailyView, Slot, KcpForm } from '@/lib/gytennis/types';
 
 export default function Quick() {
-  const { cookies, accounts, hydrate, doLogin, busy } = useAuthStore();
+  const { cookies, accounts, doLogin, busy } = useAuthStore();
   const fav = useFavoritesStore();
   const { activeSiteId } = useSiteStore();
 
@@ -34,12 +35,13 @@ export default function Quick() {
   // Tracks which courtIds returned null after a completed fetch (not still loading)
   const [failedCourts, setFailedCourts] = useState<Set<number>>(new Set());
 
-  // Hydrate stores once
+  // BUG-10: hydrate() removed — App.tsx handles it once at boot (fav.hydrate kept separately)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { hydrate(); fav.hydrate(); }, []);
+  useEffect(() => { fav.hydrate(); }, []);
 
-  // Auto-login when session is missing but credentials exist for this site
+  // BUG-4: guard auto-login behind bootAutoLogin; OFF means user must log in manually
   useEffect(() => {
+    if (!useUiStore.getState().bootAutoLogin) return;
     if (!cookies[activeSiteId] && accounts[activeSiteId]) {
       doLogin(activeSiteId);
     }

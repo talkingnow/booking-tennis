@@ -2,12 +2,22 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useSiteStore } from '@/stores/siteStore';
 import { useUiStore } from '@/stores/uiStore';
+import { applyBootAutoLoginPolicy } from '@/lib/auth/applyBootAutoLogin';
 import { Card, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
 
 export default function Account() {
-  const { accounts, cookies, busy, error, hydrate, saveCredentials, doLogin, doLogout, forget } =
-    useAuthStore();
+  // BUG-6: use individual selectors instead of whole-store destructure
+  const accounts = useAuthStore((s) => s.accounts);
+  const cookies = useAuthStore((s) => s.cookies);
+  const busy = useAuthStore((s) => s.busy);
+  const error = useAuthStore((s) => s.error);
+  const saveCredentials = useAuthStore((s) => s.saveCredentials);
+  const doLogin = useAuthStore((s) => s.doLogin);
+  const doLogout = useAuthStore((s) => s.doLogout);
+  const forget = useAuthStore((s) => s.forget);
+  // BUG-1: hydrate() removed — App.tsx handles it once at boot
+
   const { activeSiteId } = useSiteStore();
   const bootAutoLogin = useUiStore((s) => s.bootAutoLogin);
   const setBootAutoLogin = useUiStore((s) => s.setBootAutoLogin);
@@ -19,15 +29,19 @@ export default function Account() {
   const [pw, setPw] = useState('');
   const [remember, setRemember] = useState(true);
 
-  useEffect(() => {
-    hydrate();
-  }, [hydrate]);
+  // No hydrate() here — BUG-1 fix: would restore cookies and break OFF intent
 
   useEffect(() => {
     if (account) setId(account.id);
     if (account?.remember) setPw(account.pw);
     else setPw('');
   }, [account, activeSiteId]);
+
+  // BUG-3/BUG-2: toggle handler applies full policy (clears in-memory or fires login+keepAlive)
+  const onToggleBoot = (on: boolean) => {
+    setBootAutoLogin(on);
+    applyBootAutoLoginPolicy(on);
+  };
 
   const siteLabel = activeSiteId === 'pj' ? '파주시' : '고양시';
 
@@ -117,7 +131,7 @@ export default function Account() {
           <input
             type="checkbox"
             checked={bootAutoLogin}
-            onChange={(e) => setBootAutoLogin(e.target.checked)}
+            onChange={(e) => onToggleBoot(e.target.checked)}
             className="mt-1"
           />
           <div className="flex-1">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore, selectMeta } from '@/stores/authStore';
+import { useUiStore } from '@/stores/uiStore';
 import type { SiteId } from '@/lib/sites/types';
 import { isRegistered, getSite } from '@/lib/sites/registry';
 
@@ -21,6 +22,7 @@ function maskId(id: string): string {
 export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
   const meta = useAuthStore(selectMeta(siteId));
   const account = useAuthStore((s) => s.accounts[siteId]);
+  const bootAutoLogin = useUiStore((s) => s.bootAutoLogin);
   const [, tick] = useState(0);
 
   // Re-render every 30s to update relative time display
@@ -45,6 +47,18 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
   const timeLabel = relativeTime(lastValidatedAt);
 
   if (lastResult === 'idle') {
+    // BUG-5: account exists but auto-login OFF → show manual login prompt, not "확인 중…"
+    if (account && !bootAutoLogin) {
+      return (
+        <div className="flex items-center gap-2 text-sm text-amber-300">
+          <span className="w-4 text-center">🔒</span>
+          <Link to="/account" className="underline hover:text-amber-200">
+            {siteName} 수동 로그인 필요
+          </Link>
+        </div>
+      );
+    }
+    // bootAutoLogin ON (or no account) — show spinner
     return (
       <div className="flex items-center gap-2 text-sm text-slate-500">
         <span className="w-4 text-center">·</span>

@@ -117,6 +117,22 @@ describe('validateAndLogin', () => {
     expect(useAuthStore.getState().cookies.gy).toBeUndefined();
   });
 
+  // BUG-7 회귀: expired + no account → meta.lastResult must be 'no_account', NOT 'expired'
+  // (LoginBadge의 'expired' 분기는 재시도 버튼을 노출하나, account 없으면 재시도 해도 'no_account'가 됨)
+  it('BUG-7: sets meta.lastResult to no_account (not expired) when cookie expired and no account', async () => {
+    useAuthStore.setState({
+      accounts: {},
+      cookies: { gy: 'gytssn=stale' },
+    });
+
+    const adapter = makeAdapter('expired');
+    vi.mocked(getSite).mockReturnValue(adapter as any);
+
+    await useAuthStore.getState().validateAndLogin('gy');
+    const meta = useAuthStore.getState().meta.gy;
+    expect(meta?.lastResult).toBe('no_account');
+  });
+
   it('re-logins when checkSession=expired and account exists', async () => {
     useAuthStore.setState({
       accounts: { pj: { id: 'pjuser', pw: 'pjpw', remember: true, savedAt: Date.now() } },
