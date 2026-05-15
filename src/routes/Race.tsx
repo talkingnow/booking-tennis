@@ -10,7 +10,7 @@ import { getSite, isRegistered } from '@/lib/sites/registry';
 import { getCourt } from '@/lib/courts';
 import { formatRemaining, startCountdown, type CountdownHandle } from '@/lib/scheduler/countdown';
 import { measureServerOffsetMs } from '@/lib/scheduler/timeSync';
-import { openKcpPayment } from '@/lib/payment/handoff';
+import { openKcpPayment, isMobile } from '@/lib/payment/handoff';
 import { useUiStore } from '@/stores/uiStore';
 import type { KcpForm } from '@/lib/gytennis/types';
 
@@ -81,34 +81,31 @@ function defaultOpenDate_gy(): string {
 }
 
 /**
- * Next open time (Asia/Seoul) in datetime-local format. (파주시 기본)
- * Every day at 07:00 AM.
- * If today is before 07:00 KST, returns today at 07:00 KST.
- * Otherwise returns tomorrow at 07:00 KST.
+ * Next Friday 07:00 (Asia/Seoul) in datetime-local format. (파주시 기본)
+ * If today is Friday and it's before 07:00, returns today at 07:00.
+ * Otherwise returns the next Friday.
  */
 function defaultOpenDate_pj(): string {
+  // Use a simple offset-based KST calculation (UTC+9)
   const nowUTC = Date.now();
   const kstOffset = 9 * 60 * 60 * 1000;
   const nowKST = new Date(nowUTC + kstOffset);
 
-  const targetKST = new Date(nowKST);
-  if (nowKST.getUTCHours() >= 7) {
-    targetKST.setUTCDate(targetKST.getUTCDate() + 1);
+  // Find next Friday (dayOfWeek 5) at 07:00 KST
+  const dayOfWeek = nowKST.getUTCDay(); // 0=Sun ... 5=Fri
+  let daysUntilFriday = (5 - dayOfWeek + 7) % 7;
+  // If today is Friday but we're already past 07:00 KST, advance one week
+  if (daysUntilFriday === 0) {
+    const currentHourKST = nowKST.getUTCHours();
+    if (currentHourKST >= 7) daysUntilFriday = 7;
   }
+  const targetKST = new Date(nowUTC + kstOffset + daysUntilFriday * 24 * 60 * 60 * 1000);
+  // Set to 07:00 KST = 07:00 UTC+9
   targetKST.setUTCHours(7, 0, 0, 0);
 
+  // Convert back to local Date for toLocalInput
   const localDate = new Date(targetKST.getTime() - kstOffset);
   return toLocalInput(localDate);
-}
-
-function defaultTargetDate_pj(): string {
-  const d = new Date(defaultOpenDate_pj());
-  d.setDate(d.getDate() + 6);
-  // Need to extract the YYYY-MM-DD part from the local date
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
 }
 
 // ─── component ────────────────────────────────────────────────────────────────
@@ -145,25 +142,17 @@ export default function Race() {
   // add-form state
   const [newCourtId, setNewCourtId] = useState(() => courts[0]?.id ?? 1);
   const [newCourtNo, setNewCourtNo] = useState(() => courts[0]?.courtNos[0] ?? 1);
-  const [newDate, setNewDate]       = useState(() =>
-    useSiteStore.getState().activeSiteId === 'pj' ? defaultTargetDate_pj() : defaultDate()
-  );
+  const [newDate, setNewDate]       = useState(defaultDate());
   const [newHour, setNewHour]       = useState(SLOT_HOURS[SLOT_HOURS.length > 4 ? 2 : 0] ?? 12);
 
   // Default fire time depends on site
   const [target, setTarget] = useState(() =>
-    useSiteStore.getState().activeSiteId === 'pj' ? defaultOpenDate_pj() : defaultOpenDate_gy()
+    activeSiteId === 'pj' ? defaultOpenDate_pj() : defaultOpenDate_gy(),
   );
 
   // Update target + form defaults when site changes
   useEffect(() => {
-    if (activeSiteId === 'pj') {
-      setTarget(defaultOpenDate_pj());
-      setNewDate(defaultTargetDate_pj());
-    } else {
-      setTarget(defaultOpenDate_gy());
-      setNewDate(defaultDate());
-    }
+    setTarget(activeSiteId === 'pj' ? defaultOpenDate_pj() : defaultOpenDate_gy());
     const firstCourt = courts[0];
     if (firstCourt) {
       setNewCourtId(firstCourt.id);
@@ -175,7 +164,9 @@ export default function Race() {
   const [phase, setPhase]       = useState<Phase>('setup');
   const [remaining, setRemaining] = useState<number | null>(null);
   const [error, setError]       = useState<string | null>(null);
+  const [precheckStatus, setPrecheckStatus] = useState<null | 'pending' | 'ok' | 'relogin' | 'failed'>(null);
   const handleRef               = useRef<CountdownHandle | null>(null);
+  const precheckTimerRef        = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // payment
   const [kcpReady, setKcpReady]   = useState<null | { orderId: string; kcp: KcpForm }>(null);
@@ -238,12 +229,53 @@ export default function Race() {
 
   // ── arm ────────────────────────────────────────────────────────────────────
 
+  // T-30s pre-fire session check: if cookie expired (e.g. another device kicked
+  // this session out), re-login while we still have ~30s of slack. Runs once
+  // per arm cycle. Failures degrade gracefully — fire() still tries with
+  // whatever cookie is current.
+  const runPrecheck = async () => {
+    const siteId = activeSiteIdRef.current;
+    if (!isRegistered(siteId)) return;
+    const ad = getSite(siteId);
+    const c = useAuthStore.getState().cookies[siteId];
+    if (!c) {
+      // No cookie — try to login if we have stored credentials
+      if (useAuthStore.getState().accounts[siteId]) {
+        setPrecheckStatus('relogin');
+        const ok = await useAuthStore.getState().doLogin(siteId);
+        setPrecheckStatus(ok ? 'ok' : 'failed');
+      } else {
+        setPrecheckStatus('failed');
+      }
+      return;
+    }
+    setPrecheckStatus('pending');
+    try {
+      const status = await ad.checkSession(c);
+      if (status === 'valid') {
+        setPrecheckStatus('ok');
+        return;
+      }
+      // expired or unknown — attempt re-login if credentials are stored
+      if (useAuthStore.getState().accounts[siteId]) {
+        setPrecheckStatus('relogin');
+        const ok = await useAuthStore.getState().doLogin(siteId);
+        setPrecheckStatus(ok ? 'ok' : 'failed');
+      } else {
+        setPrecheckStatus('failed');
+      }
+    } catch {
+      setPrecheckStatus('failed');
+    }
+  };
+
   const arm = async () => {
     if (!prioritiesRef.current.length)
       return setError('우선순위를 1개 이상 입력하세요.');
     if (targetMs - Date.now() < 1_000)
       return setError('예약 시각이 너무 가깝거나 이미 지났습니다.');
     setError(null);
+    setPrecheckStatus(null);
     cascadeIdxRef.current = 0;
     cascadeResultsRef.current = [];
     setCascadeIdx(0);
@@ -256,11 +288,21 @@ export default function Race() {
       onTick: (ms) => setRemaining(ms),
       onFire: () => fire(),
     });
+
+    // Schedule T-30s precheck (fire immediately if target is already <30s away)
+    const delay = Math.max(0, targetMs - Date.now() - 30_000);
+    if (precheckTimerRef.current) clearTimeout(precheckTimerRef.current);
+    precheckTimerRef.current = setTimeout(() => { void runPrecheck(); }, delay);
   };
 
   const cancelArm = () => {
     handleRef.current?.cancel();
     handleRef.current = null;
+    if (precheckTimerRef.current) {
+      clearTimeout(precheckTimerRef.current);
+      precheckTimerRef.current = null;
+    }
+    setPrecheckStatus(null);
     setArmed(false);
     setPhase('setup');
     setRemaining(null);
@@ -323,12 +365,13 @@ export default function Race() {
     await fire();
   };
 
-  const openPaymentPopup = async () => {
+  const openPaymentPopup = () => {
     const current = kcpReadyRef.current;
     if (!current) return;
     payConfirmedRef.current = false;
-    await openKcpPayment(current.kcp, {
-      siteId: activeSiteIdRef.current,
+    const siteId = activeSiteIdRef.current;
+    void openKcpPayment(current.kcp, {
+      siteId,
       onWindowClosed: async () => {
         if (!payConfirmedRef.current) {
           const siteId = activeSiteIdRef.current;
@@ -384,7 +427,7 @@ export default function Race() {
   const newCourtNos = getCourt(activeSiteId, newCourtId)?.courtNos ?? [1, 2, 3, 4];
 
   const openDateNote = activeSiteId === 'pj'
-    ? '파주시: 희망일 6일 전 07:00 오픈'
+    ? '파주시: 매주 금요일 07:00에 다음주 예약 오픈'
     : '고양시: 매달 25일 22:00에 다음달 예약 오픈';
 
   return (
@@ -461,30 +504,12 @@ export default function Race() {
                   <label className="block text-xs text-slate-500 mb-1">날짜</label>
                   <div className="flex gap-1">
                     <input type="date" value={newDate}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setNewDate(val);
-                        if (activeSiteId === 'pj' && val) {
-                          const d = new Date(val);
-                          d.setDate(d.getDate() - 6);
-                          d.setHours(7, 0, 0, 0);
-                          setTarget(toLocalInput(d));
-                        }
-                      }}
+                      onChange={(e) => setNewDate(e.target.value)}
                       className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs"
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        const nextMonth = defaultDate();
-                        setNewDate(nextMonth);
-                        if (activeSiteId === 'pj' && nextMonth) {
-                          const d = new Date(nextMonth);
-                          d.setDate(d.getDate() - 6);
-                          d.setHours(7, 0, 0, 0);
-                          setTarget(toLocalInput(d));
-                        }
-                      }}
+                      onClick={() => setNewDate(defaultDate())}
                       className="text-xs px-2 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 shrink-0"
                       title="다음달 오늘"
                     >+1달</button>
@@ -560,6 +585,23 @@ export default function Race() {
             예약 시각에 슬롯 조회 → 우선순위 순 자동 예약 ({priorities.length}개)
           </p>
           <p className="text-xs text-slate-500 mt-4">앱을 닫지 마세요. 화면 자동 꺼짐 방지 권장.</p>
+          {precheckStatus && (
+            <p
+              className={
+                'text-xs mt-2 ' +
+                (precheckStatus === 'ok'
+                  ? 'text-emerald-400'
+                  : precheckStatus === 'failed'
+                    ? 'text-red-400'
+                    : 'text-amber-300')
+              }
+            >
+              {precheckStatus === 'pending' && '🔐 세션 사전 점검 중…'}
+              {precheckStatus === 'relogin' && '🔄 세션 만료 감지 — 재로그인 중…'}
+              {precheckStatus === 'ok' && '✓ 세션 정상'}
+              {precheckStatus === 'failed' && '⚠ 사전 점검 실패 — 발사는 그대로 진행됩니다'}
+            </p>
+          )}
           <div className="mt-6">
             <Button variant="danger" onClick={cancelArm}>취소</Button>
           </div>
@@ -590,7 +632,7 @@ export default function Race() {
             <Button onClick={openPaymentPopup} className="w-full">
               결제창 열기 →
             </Button>
-            {windowClosed && (
+            {!isMobile() && windowClosed && (
               <p className="text-xs text-yellow-400">
                 결제창이 닫혔습니다. 결제창 열기를 다시 눌러 재시도하거나, 결제 완료 ✓를 누르세요.
               </p>
