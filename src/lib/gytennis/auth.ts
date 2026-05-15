@@ -17,10 +17,11 @@ export async function login(userid: string, passwd: string): Promise<LoginResult
     if (res.upstreamError) {
       return { ok: false, reason: 'upstream_unreachable' };
     }
-    // gytennis returns 303→/ on success, 200 (login page re-rendered) on failure.
-    // Crucially, the server also returns a guest gytssn cookie on failed logins,
-    // so we must NOT rely on cookie presence alone — check status strictly.
-    if (res.status === 303 && cookie) {
+    // gytennis returns 303→/ on success, 303→/Login on failure (with guest cookie).
+    // Status alone is insufficient — also check Location target. Failed logins
+    // redirect back to /Login; successful logins redirect to / (root).
+    const redirectsToLogin = res.location ? /\/Login\b/i.test(res.location) : false;
+    if (res.status === 303 && cookie && !redirectsToLogin) {
       return { ok: true, cookie };
     }
     let errBody: string | null = null;

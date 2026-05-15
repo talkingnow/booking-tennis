@@ -21,8 +21,10 @@ export async function login(userid: string, passwd: string): Promise<LoginResult
     if (res.upstreamError) {
       return { ok: false, reason: 'upstream_unreachable' };
     }
-    // pjtennis: 303→/ on success, 200 (login page re-rendered) on failure.
-    if (res.status === 303 && cookie) {
+    // pjtennis: 303→/ on success, 303→/Login on failure (with guest cookie).
+    // Status alone is insufficient — also check Location target.
+    const redirectsToLogin = res.location ? /\/Login\b/i.test(res.location) : false;
+    if (res.status === 303 && cookie && !redirectsToLogin) {
       return { ok: true, cookie };
     }
     let errBody: string | null = null;
