@@ -67,7 +67,7 @@ const _loginPromises: Partial<Record<SiteId, Promise<boolean>>> = {};
 let _keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
 const KEEP_ALIVE_MS = 25 * 60 * 1000; // 25 minutes
-const SITE_IDS: SiteId[] = ['gy', 'pj'];
+export const SITE_IDS: SiteId[] = ['gy', 'pj'];
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   accounts: {},

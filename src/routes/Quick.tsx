@@ -15,9 +15,14 @@ import { SlotGrid } from '@/components/SlotGrid';
 import type { DailyView, Slot, KcpForm } from '@/lib/gytennis/types';
 
 export default function Quick() {
-  const { cookies, accounts, doLogin, busy } = useAuthStore();
+  // F2: individual selectors (mirrors Account.tsx BUG-6 fix) — avoid whole-store subscription
+  const cookies = useAuthStore((s) => s.cookies);
+  const accounts = useAuthStore((s) => s.accounts);
+  const doLogin = useAuthStore((s) => s.doLogin);
+  const busy = useAuthStore((s) => s.busy);
   const fav = useFavoritesStore();
   const { activeSiteId } = useSiteStore();
+  const bootAutoLogin = useUiStore((s) => s.bootAutoLogin);
 
   const account = accounts[activeSiteId] ?? null;
   const cookie = cookies[activeSiteId] ?? null;
@@ -46,13 +51,14 @@ export default function Quick() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fav.hydrate(); }, []);
 
-  // BUG-4: guard auto-login behind bootAutoLogin; OFF means user must log in manually
+  // BUG-4 / F3: guard auto-login behind bootAutoLogin (subscribed, so OFF→ON re-runs the effect)
   useEffect(() => {
-    if (!useUiStore.getState().bootAutoLogin) return;
+    if (!bootAutoLogin) return;
     if (!cookies[activeSiteId] && accounts[activeSiteId]) {
       doLogin(activeSiteId);
     }
-  }, [activeSiteId, cookies, accounts, doLogin]);
+  }, [activeSiteId, cookies, accounts, doLogin, bootAutoLogin]);
+
   // Reset data when site changes
   useEffect(() => {
     setData(new Map());
