@@ -65,17 +65,33 @@ export function isStandalonePwa(): boolean {
  * KCP redirects the result to /api/kcp-return which proxies to /payment-result.
  * Always opens in _blank (no width/height features) so KCP mobile UI fills the tab.
  */
+// Redirect-style fields that gytennis/KCP embed — strip them so we can inject our own.
+const REDIRECT_FIELDS = new Set([
+  'm_redirect_url', 'Ret_URL', 'ret_url', 'RETURN_URL', 'return_url',
+  'callback_url', 'noti_url', 'KCPRedirectURL',
+  'returnUrl', 'ReturnUrl', 'retUrl', 'complete_url', 'CompleteUrl',
+  'success_url', 'SuccessUrl', 'fail_url', 'FailUrl',
+  'm_signal_url', 'notice_url', 'NoticeUrl', 'redirect_url', 'RedirectURL',
+]);
+
 function openKcpMobileSdk(kcp: KcpForm, siteId: SiteId | undefined): null {
-  const siteQuery = siteId ? `?site=${encodeURIComponent(siteId)}` : '';
-  const redirectUrl = `${location.origin}/api/kcp-return${siteQuery}`;
+  const orderId = kcp.fields.ordr_idxx ?? '';
+  const qs = new URLSearchParams();
+  if (orderId) qs.set('order_id', orderId);
+  if (siteId) qs.set('site', siteId);
+  const qsPart = qs.toString() ? `?${qs.toString()}` : '';
+  const redirectUrl = `${location.origin}/api/kcp-return${qsPart}`;
 
   // Resolve action to absolute URL for the form
   const action = kcp.action.startsWith('http')
     ? kcp.action
     : `https://www.gytennis.or.kr${kcp.action.startsWith('/') ? '' : '/'}${kcp.action}`;
 
-  // Build fields, ensuring pay_method and m_redirect_url are present
-  const mergedFields: Record<string, string> = { ...kcp.fields };
+  // Strip redirect fields, ensure pay_method default, inject our m_redirect_url
+  const mergedFields: Record<string, string> = {};
+  for (const [k, v] of Object.entries(kcp.fields)) {
+    if (!REDIRECT_FIELDS.has(k)) mergedFields[k] = v;
+  }
   if (!mergedFields.pay_method) mergedFields.pay_method = '100000000000';
   mergedFields.m_redirect_url = redirectUrl;
 

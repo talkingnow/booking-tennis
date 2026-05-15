@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { isMobile, toMobileAction, isStandalonePwa, openKcpPayment } from '../src/lib/payment/handoff';
 
+// Helper: intercept Blob constructor to capture HTML content synchronously
+function captureBlobHtml(fn: () => Promise<unknown>): Promise<string> {
+  return new Promise((resolve) => {
+    const OriginalBlob = globalThis.Blob;
+    vi.stubGlobal('Blob', class MockBlob extends OriginalBlob {
+      constructor(parts: BlobPart[], opts?: BlobPropertyBag) {
+        super(parts, opts);
+        if (typeof parts[0] === 'string') resolve(parts[0] as string);
+      }
+    });
+    fn().catch(() => {});
+  });
+}
+
 describe('isMobile(ua)', () => {
   it('iPhone UA → true', () => {
     expect(
@@ -111,23 +125,90 @@ describe('openKcpPayment mobile — SDK blob 방식', () => {
     expect(result).toBeNull();
   });
 
-  it('siteId 가 m_redirect_url(/api/kcp-return?site=gy) 에 포함되어 blob 생성됨', async () => {
-    // Intercept Blob constructor to capture HTML content
-    const capturedParts: string[] = [];
-    const OriginalBlob = globalThis.Blob;
-    vi.stubGlobal('Blob', class MockBlob extends OriginalBlob {
-      constructor(parts: BlobPart[], opts?: BlobPropertyBag) {
-        super(parts, opts);
-        if (typeof parts[0] === 'string') capturedParts.push(parts[0]);
-      }
-    });
-
-    await openKcpPayment(
-      { action: 'https://spay.kcp.co.kr/kcpPaypop.do', fields: { site_cd: 'A1234', ordr_idxx: 'ORDER004' } },
-      { siteId: 'gy' },
+  it('m_redirect_url 에 order_id 와 site 모두 포함됨', async () => {
+    const html = await captureBlobHtml(() =>
+      openKcpPayment(
+        { action: 'https://spay.kcp.co.kr/kcpPaypop.do', fields: { site_cd: 'A1234', ordr_idxx: 'ORDER004' } },
+        { siteId: 'gy' },
+      ),
     );
-    expect(capturedParts.length).toBeGreaterThan(0);
-    expect(capturedParts[0]).toContain('/api/kcp-return?site=gy');
+    expect(html).toContain('order_id=ORDER004');
+    expect(html).toContain('site=gy');
+    expect(html).toContain('/api/kcp-return');
+  });
+
+  it('redirect 계열 필드(Ret_URL / callback_url 등) strip 확인', async () => {
+    const html = await captureBlobHtml(() =>
+      openKcpPayment({
+        action: 'https://spay.kcp.co.kr/kcpPaypop.do',
+        fields: {
+          site_cd: 'A1234',
+          ordr_idxx: 'ORDER005',
+          Ret_URL: 'https://www.gytennis.or.kr/ret',
+          callback_url: 'https://www.gytennis.or.kr/cb',
+          m_redirect_url: 'https://www.gytennis.or.kr/MUST_BE_GONE',
+        },
+      }),
+    );
+    expect(html).not.toContain('gytennis.or.kr');
+    expect(html).toContain('/api/kcp-return');
+  });
+
+  it('pay_method 미입력 시 기본값 100000000000 폴백', async () => {
+    const html = await captureBlobHtml(() =>
+      openKcpPayment({
+        action: 'https://spay.kcp.co.kr/kcpPaypop.do',
+        fields: { site_cd: 'Z0001', ordr_idxx: 'ORD-PM' },
+      }),
+    );
+    expect(html).toContain('name="pay_method"');
+    expect(html).toContain('value="100000000000"');
+  });
+});
+
+describe('openKcpPayment PC — m_redirect_url 미주입 + features 유지 (회귀)', () => {
+  let openedFeatures: string | undefined;
+
+  beforeEach(() => {
+    openedFeatures = undefined;
+    // Desktop UA
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+      maxTouchPoints: 0,
+    });
+    vi.stubGlobal('location', { origin: 'https://booking.example.com' });
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:pc-mock-url'),
+      revokeObjectURL: vi.fn(),
+    });
+    vi.stubGlobal('window', {
+      navigator: {
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+        maxTouchPoints: 0,
+      },
+      open: vi.fn((_url: string, _target: string, features?: string) => {
+        openedFeatures = features;
+        return { closed: false };
+      }),
+      matchMedia: undefined,
+    });
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('PC 팝업에 width/height features 인자 포함', async () => {
+    await openKcpPayment({
+      action: 'https://spay.kcp.co.kr/kcpPaypop.do',
+      fields: { site_cd: 'A1234', ordr_idxx: 'PC001' },
+    });
+    expect(openedFeatures).toContain('width=720');
+    expect(openedFeatures).toContain('height=820');
   });
 });
 
