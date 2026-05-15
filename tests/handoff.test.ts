@@ -1,19 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { isMobile, toMobileAction, isStandalonePwa, openKcpPayment } from '../src/lib/payment/handoff';
 
-// Helper: intercept Blob constructor to capture HTML content synchronously
-function captureBlobHtml(fn: () => Promise<unknown>): Promise<string> {
-  return new Promise((resolve) => {
-    const OriginalBlob = globalThis.Blob;
-    vi.stubGlobal('Blob', class MockBlob extends OriginalBlob {
-      constructor(parts: BlobPart[], opts?: BlobPropertyBag) {
-        super(parts, opts);
-        if (typeof parts[0] === 'string') resolve(parts[0] as string);
-      }
-    });
-    fn().catch(() => {});
-  });
-}
+type KcpHandoffPayload = { action: string; fields: Record<string, string> };
 
 describe('isMobile(ua)', () => {
   it('iPhone UA → true', () => {
@@ -59,62 +47,42 @@ describe('toMobileAction', () => {
   });
 });
 
-describe('openKcpPayment mobile — SDK blob 방식', () => {
-  let openedUrl: string | null = null;
-  let openedTarget: string | null = null;
-  let openedFeatures: string | undefined;
+describe('openKcpPayment mobile — kcp-pay.html 핸드오프 방식', () => {
+  let sessionStore: Record<string, string>;
+  let loc: { origin: string; href: string };
+
+  const readHandoff = (): KcpHandoffPayload =>
+    JSON.parse(sessionStore['kcp_handoff']) as KcpHandoffPayload;
 
   beforeEach(() => {
-    openedUrl = null;
-    openedTarget = null;
-    openedFeatures = undefined;
+    sessionStore = {};
+    loc = { origin: 'https://booking.example.com', href: '' };
     vi.stubGlobal('navigator', {
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
       maxTouchPoints: 5,
     });
-    vi.stubGlobal('location', { origin: 'https://booking.example.com' });
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: vi.fn(() => 'blob:mock-url'),
-      revokeObjectURL: vi.fn(),
+    vi.stubGlobal('location', loc);
+    vi.stubGlobal('sessionStorage', {
+      setItem: (k: string, v: string) => { sessionStore[k] = v; },
+      getItem: (k: string) => sessionStore[k] ?? null,
+      removeItem: (k: string) => { delete sessionStore[k]; },
     });
-    vi.stubGlobal('window', {
-      navigator: {
-        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
-        maxTouchPoints: 5,
-      },
-      open: vi.fn((url: string, target: string, features?: string) => {
-        openedUrl = url;
-        openedTarget = target;
-        openedFeatures = features;
-        return { closed: false };
-      }),
-      matchMedia: undefined,
-    });
-    vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    vi.useRealTimers();
   });
 
-  it('window.open 이 _blank 타겟으로 blob URL 호출됨', async () => {
+  it('sessionStorage 에 핸드오프 저장 후 /kcp-pay.html 로 이동', async () => {
     await openKcpPayment({
       action: 'https://spay.kcp.co.kr/kcpPaypop.do',
       fields: { site_cd: 'A1234', ordr_idxx: 'ORDER001', good_name: '테니스장' },
     });
-    expect(openedUrl).toBe('blob:mock-url');
-    expect(openedTarget).toBe('_blank');
-  });
-
-  it('모바일 흐름에서 features 인자 없음 (PC 팝업 사이즈 없음)', async () => {
-    await openKcpPayment({
-      action: 'https://spay.kcp.co.kr/kcpPaypop.do',
-      fields: { site_cd: 'A1234', ordr_idxx: 'ORDER002' },
-    });
-    expect(openedFeatures).toBeUndefined();
+    expect(loc.href).toBe('https://booking.example.com/kcp-pay.html');
+    const payload = readHandoff();
+    expect(payload.action).toBe('https://spay.kcp.co.kr/kcpPaypop.do');
+    expect(payload.fields.site_cd).toBe('A1234');
   });
 
   it('반환값은 null (모바일 탭 추적 불가)', async () => {
@@ -126,43 +94,40 @@ describe('openKcpPayment mobile — SDK blob 방식', () => {
   });
 
   it('m_redirect_url 에 order_id 와 site 모두 포함됨', async () => {
-    const html = await captureBlobHtml(() =>
-      openKcpPayment(
-        { action: 'https://spay.kcp.co.kr/kcpPaypop.do', fields: { site_cd: 'A1234', ordr_idxx: 'ORDER004' } },
-        { siteId: 'gy' },
-      ),
+    await openKcpPayment(
+      { action: 'https://spay.kcp.co.kr/kcpPaypop.do', fields: { site_cd: 'A1234', ordr_idxx: 'ORDER004' } },
+      { siteId: 'gy' },
     );
-    expect(html).toContain('order_id=ORDER004');
-    expect(html).toContain('site=gy');
-    expect(html).toContain('/api/kcp-return');
+    const redirect = readHandoff().fields.m_redirect_url;
+    expect(redirect).toContain('/api/kcp-return');
+    expect(redirect).toContain('order_id=ORDER004');
+    expect(redirect).toContain('site=gy');
   });
 
   it('redirect 계열 필드(Ret_URL / callback_url 등) strip 확인', async () => {
-    const html = await captureBlobHtml(() =>
-      openKcpPayment({
-        action: 'https://spay.kcp.co.kr/kcpPaypop.do',
-        fields: {
-          site_cd: 'A1234',
-          ordr_idxx: 'ORDER005',
-          Ret_URL: 'https://www.gytennis.or.kr/ret',
-          callback_url: 'https://www.gytennis.or.kr/cb',
-          m_redirect_url: 'https://www.gytennis.or.kr/MUST_BE_GONE',
-        },
-      }),
-    );
-    expect(html).not.toContain('gytennis.or.kr');
-    expect(html).toContain('/api/kcp-return');
+    await openKcpPayment({
+      action: 'https://spay.kcp.co.kr/kcpPaypop.do',
+      fields: {
+        site_cd: 'A1234',
+        ordr_idxx: 'ORDER005',
+        Ret_URL: 'https://www.gytennis.or.kr/ret',
+        callback_url: 'https://www.gytennis.or.kr/cb',
+        m_redirect_url: 'https://www.gytennis.or.kr/MUST_BE_GONE',
+      },
+    });
+    const { fields } = readHandoff();
+    expect(fields.Ret_URL).toBeUndefined();
+    expect(fields.callback_url).toBeUndefined();
+    expect(fields.m_redirect_url).toContain('/api/kcp-return');
+    expect(fields.m_redirect_url).not.toContain('gytennis.or.kr');
   });
 
   it('pay_method 미입력 시 기본값 100000000000 폴백', async () => {
-    const html = await captureBlobHtml(() =>
-      openKcpPayment({
-        action: 'https://spay.kcp.co.kr/kcpPaypop.do',
-        fields: { site_cd: 'Z0001', ordr_idxx: 'ORD-PM' },
-      }),
-    );
-    expect(html).toContain('name="pay_method"');
-    expect(html).toContain('value="100000000000"');
+    await openKcpPayment({
+      action: 'https://spay.kcp.co.kr/kcpPaypop.do',
+      fields: { site_cd: 'Z0001', ordr_idxx: 'ORD-PM' },
+    });
+    expect(readHandoff().fields.pay_method).toBe('100000000000');
   });
 });
 

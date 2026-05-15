@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=yes,maximum-scale=5.0">
+<title>결제 진행 중...</title>
+<style>
+  html,body{margin:0;padding:0;overflow:auto;-webkit-overflow-scrolling:touch;}
+  body{padding:16px;background:#0f172a;color:#f1f5f9;font-family:sans-serif;
+       min-height:100dvh;box-sizing:border-box;}
+  .center{display:flex;flex-direction:column;align-items:center;justify-content:center;
+          min-height:100dvh;gap:16px;}
+  .msg{font-size:15px;}
+  .err{color:#f87171;font-size:13px;margin-top:8px;text-align:center;}
+</style>
+</head>
+<body>
+<!--
+  Real same-origin page (NOT a blob:) that hosts the KCP payment form.
+  KCP's SDK sends document.location as `cp_domain` to its server; a blob:
+  URL breaks KCP's mobile detection and forces the PC payment window. Serving
+  this from a real https:// path lets KCP render its mobile UI on phones.
+  Form data is handed over via sessionStorage (same-origin, same tab).
+-->
+<script>
+(function () {
+  try {
+    var raw = sessionStorage.getItem('kcp_handoff');
+    if (!raw) throw new Error('결제 정보가 없습니다 (sessionStorage 비어있음)');
+    sessionStorage.removeItem('kcp_handoff');
+    var data = JSON.parse(raw);
+    var form = document.createElement('form');
+    form.name = 'order_info';
+    form.method = 'post';
+    form.action = data.action;
+    form.acceptCharset = 'UTF-8';
+    Object.keys(data.fields).forEach(function (k) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = k;
+      input.value = data.fields[k];
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+  } catch (e) {
+    document.addEventListener('DOMContentLoaded', function () {
+      var el = document.getElementById('err');
+      if (el) { el.textContent = '결제창 오류: ' + e.message; el.style.display = 'block'; }
+    });
+    window.__kcpHandoffError = true;
+  }
+})();
+</script>
+<div class="center">
+<p class="msg">결제창을 불러오는 중입니다...</p>
+<p class="err" id="err" style="display:none"></p>
+</div>
+<script src="https://pay.kcp.co.kr/plugin/payplus_web.jsp"></script>
+<script>
+window.addEventListener('load', function () {
+  if (window.__kcpHandoffError) return;
+  try {
+    KCP_Pay_Execute(document.order_info);
+  } catch (e) {
+    var el = document.getElementById('err');
+    el.textContent = '결제창 오류: ' + e.message;
+    el.style.display = 'block';
+  }
+});
+</script>
+</body>
+</html>

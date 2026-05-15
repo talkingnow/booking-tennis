@@ -26,7 +26,9 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        // /kcp-pay.html is a real static page (KCP SDK host) — must NOT fall
+        // back to the SPA shell, or document.location would be the SPA route.
+        navigateFallbackDenylist: [/^\/api\//, /^\/kcp-pay\.html$/],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api/'),

@@ -61,9 +61,14 @@ export function isStandalonePwa(): boolean {
 }
 
 /**
- * Mobile flow: open a blob page that loads KCP SDK and calls KCP_Pay_Execute.
- * KCP redirects the result to /api/kcp-return which proxies to /payment-result.
- * Always opens in _blank (no width/height features) so KCP mobile UI fills the tab.
+ * Mobile flow: hand the KCP form to /kcp-pay.html — a real same-origin static
+ * page — via sessionStorage, then navigate the current tab there.
+ *
+ * Why a real page and not a blob: the KCP SDK sends `document.location` to its
+ * server as `cp_domain` (payplus_webExe.js). A `blob:` URL is not a recognised
+ * origin, so KCP falls back to its PC payment window even on phones. Serving
+ * the SDK host from a real https:// path makes KCP render its mobile UI.
+ * Result returns via m_redirect_url → /api/kcp-return → /payment-result.
  */
 // Redirect-style fields that gytennis/KCP embed — strip them so we can inject our own.
 const REDIRECT_FIELDS = new Set([
@@ -95,56 +100,13 @@ function openKcpMobileSdk(kcp: KcpForm, siteId: SiteId | undefined): null {
   if (!mergedFields.pay_method) mergedFields.pay_method = '100000000000';
   mergedFields.m_redirect_url = redirectUrl;
 
-  const fieldsHtml = Object.entries(mergedFields)
-    .map(([n, v]) => `<input type="hidden" name="${escAttr(n)}" value="${escAttr(v)}" />`)
-    .join('\n');
+  // Hand the form to /kcp-pay.html via sessionStorage (same-origin, same tab),
+  // then navigate there. /kcp-pay.html is a real https:// page so the KCP SDK
+  // reports a valid `cp_domain` and renders its mobile payment UI.
+  sessionStorage.setItem('kcp_handoff', JSON.stringify({ action, fields: mergedFields }));
 
-  const pageHtml = `<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=yes,maximum-scale=5.0">
-<title>결제 진행 중...</title>
-<style>
-  html,body{margin:0;padding:0;overflow:auto;-webkit-overflow-scrolling:touch;}
-  body{padding:16px;background:#0f172a;color:#f1f5f9;font-family:sans-serif;
-       min-height:100dvh;box-sizing:border-box;}
-  .center{display:flex;flex-direction:column;align-items:center;justify-content:center;
-          min-height:100dvh;gap:16px;}
-  .msg{font-size:15px;}
-  .err{color:#f87171;font-size:13px;margin-top:8px;}
-</style>
-</head>
-<body>
-<form name="order_info" method="post" action="${escAttr(action)}" accept-charset="UTF-8">
-${fieldsHtml}
-</form>
-<div class="center">
-<p class="msg">결제창을 불러오는 중입니다...</p>
-<p class="err" id="err" style="display:none"></p>
-</div>
-<script src="${KCP_SDK_URL}"></script>
-<script>
-window.addEventListener('load', function () {
-  try {
-    KCP_Pay_Execute(document.order_info);
-  } catch (e) {
-    var el = document.getElementById('err');
-    el.textContent = '결제창 오류: ' + e.message;
-    el.style.display = 'block';
-  }
-});
-</script>
-</body>
-</html>`;
-
-  const blob = new Blob([pageHtml], { type: 'text/html;charset=utf-8' });
-  const blobUrl = URL.createObjectURL(blob);
-
-  debugLog('info', `KCP mobile SDK blob action=${action} redirect=${redirectUrl} fields=${Object.keys(mergedFields).join(',')}`);
-  window.open(blobUrl, '_blank');
-
-  setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
+  debugLog('info', `KCP mobile SDK → /kcp-pay.html action=${action} redirect=${redirectUrl} fields=${Object.keys(mergedFields).join(',')}`);
+  location.href = `${location.origin}/kcp-pay.html`;
 
   return null;
 }
