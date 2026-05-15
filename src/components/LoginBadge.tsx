@@ -118,13 +118,17 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
     );
   }
 
-  // no_account
-  return (
-    <div className="flex items-center gap-2 text-sm text-slate-500">
-      <span className="w-4 text-center">+</span>
-      <Link to="/account" className="underline hover:text-slate-300">
-        {siteName} 계정 미설정
-      </Link>
-    </div>
-  );
+  if (lastResult === 'no_account') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <span className="w-4 text-center">+</span>
+        <Link to="/account" className="underline hover:text-slate-300">
+          {siteName} 계정 미설정
+        </Link>
+      </div>
+    );
+  }
+
+  // F5: exhaustive over SiteAuthResult — all 6 branches handled above. Render nothing for unknown.
+  return null;
 }
