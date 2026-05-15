@@ -1,5 +1,6 @@
 import { gyFetch, extractGytssn } from './proxyClient';
 import type { LoginResult } from './types';
+import { classifyLoginFailure } from '@/lib/auth/classifyFailure';
 import { debugLog } from '@/components/DebugPanel';
 
 /**
@@ -22,7 +23,13 @@ export async function login(userid: string, passwd: string): Promise<LoginResult
     if (res.status === 303 && cookie) {
       return { ok: true, cookie };
     }
-    return { ok: false, reason: 'bad_credentials' };
+    let errBody: string | null = null;
+    try { errBody = await res.text(); } catch { /* ignore */ }
+    const reason = classifyLoginFailure(errBody);
+    if (reason !== 'bad_credentials') {
+      debugLog('err', `Login classified as ${reason}`);
+    }
+    return { ok: false, reason };
   } catch (e) {
     return { ok: false, reason: 'network', detail: String(e) };
   }

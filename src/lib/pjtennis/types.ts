@@ -14,6 +14,7 @@ export type {
   CalendarEntry,
   DailyView,
   LoginResult,
+  LoginFailReason,
   ReservationResult,
   KcpForm,
 } from '@/lib/gytennis/types';
