@@ -66,9 +66,17 @@ export type DailyView = {
   cdate: string;
 };
 
+export type LoginFailReason =
+  | 'bad_credentials'
+  | 'rate_limited'
+  | 'account_locked'
+  | 'network'
+  | 'unknown'
+  | 'upstream_unreachable';
+
 export type LoginResult =
   | { ok: true; cookie: string }
-  | { ok: false; reason: 'bad_credentials' | 'network' | 'unknown' | 'upstream_unreachable'; detail?: string };
+  | { ok: false; reason: LoginFailReason; detail?: string };
 
 export type ReservationResult =
   | {

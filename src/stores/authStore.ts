@@ -141,11 +141,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const errMsg =
         result.reason === 'bad_credentials'
           ? '아이디 또는 비밀번호가 올바르지 않습니다.'
-          : result.reason === 'upstream_unreachable'
-            ? '서버 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.'
-            : result.reason === 'network'
-              ? '네트워크 오류가 발생했습니다.'
-              : '로그인에 실패했습니다.';
+          : result.reason === 'rate_limited'
+            ? '로그인 시도가 너무 잦습니다. 잠시 기다린 뒤 다시 시도해 주세요.'
+            : result.reason === 'account_locked'
+              ? '계정이 잠겼거나 이용이 제한되었습니다. 사이트에서 직접 확인해 주세요.'
+              : result.reason === 'upstream_unreachable'
+                ? '서버 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.'
+                : result.reason === 'network'
+                  ? '네트워크 오류가 발생했습니다.'
+                  : '로그인에 실패했습니다.';
       set((state) => ({
         busy: false,
         error: errMsg,
