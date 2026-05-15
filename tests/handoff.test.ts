@@ -45,165 +45,89 @@ describe('toMobileAction', () => {
   });
 });
 
-describe('openKcpPayment mobile — redirect field 처리', () => {
-  let capturedForm: HTMLFormElement | null = null;
+describe('openKcpPayment mobile — SDK blob 방식', () => {
+  let openedUrl: string | null = null;
+  let openedTarget: string | null = null;
+  let openedFeatures: string | undefined;
 
   beforeEach(() => {
-    capturedForm = null;
+    openedUrl = null;
+    openedTarget = null;
+    openedFeatures = undefined;
     vi.stubGlobal('navigator', {
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
       maxTouchPoints: 5,
     });
     vi.stubGlobal('location', { origin: 'https://booking.example.com' });
-    // Intercept form.submit to capture the form without navigating
-    vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function(this: HTMLFormElement) {
-      capturedForm = this.cloneNode(true) as HTMLFormElement;
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:mock-url'),
+      revokeObjectURL: vi.fn(),
     });
+    vi.stubGlobal('window', {
+      navigator: {
+        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+        maxTouchPoints: 5,
+      },
+      open: vi.fn((url: string, target: string, features?: string) => {
+        openedUrl = url;
+        openedTarget = target;
+        openedFeatures = features;
+        return { closed: false };
+      }),
+      matchMedia: undefined,
+    });
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    document.querySelectorAll('form').forEach(f => f.remove());
+    vi.useRealTimers();
   });
 
-  it('gytennis m_redirect_url 필드를 제거하고 우리 URL만 포함', () => {
-    openKcpPayment({
+  it('window.open 이 _blank 타겟으로 blob URL 호출됨', async () => {
+    await openKcpPayment({
       action: 'https://spay.kcp.co.kr/kcpPaypop.do',
-      fields: {
-        site_cd: 'A1234',
-        ordr_idxx: 'ORDER001',
-        good_name: '테니스장 예약',
-        m_redirect_url: 'https://www.gytennis.or.kr/ordrErr',
-        Ret_URL: 'https://www.gytennis.or.kr/ret',
-        ret_url: 'https://www.gytennis.or.kr/ret2',
-      },
+      fields: { site_cd: 'A1234', ordr_idxx: 'ORDER001', good_name: '테니스장' },
     });
-
-    expect(capturedForm).not.toBeNull();
-    const form = capturedForm!;
-    const names = Array.from(form.querySelectorAll('input[type=hidden]')).map(i => (i as HTMLInputElement).name);
-
-    expect(names).toContain('m_redirect_url');
-    expect(names).not.toContain('Ret_URL');
-    expect(names).not.toContain('ret_url');
-
-    const redirectInput = form.querySelector('input[name="m_redirect_url"]') as HTMLInputElement;
-    expect(redirectInput.value).toContain('booking.example.com');
-    expect(redirectInput.value).not.toContain('gytennis');
-    expect(redirectInput.value).toContain('ORDER001');
-
-    expect(names).toContain('site_cd');
-    expect(names).toContain('good_name');
+    expect(openedUrl).toBe('blob:mock-url');
+    expect(openedTarget).toBe('_blank');
   });
 
-  it('callback_url / noti_url / KCPRedirectURL / RETURN_URL 모두 제거', () => {
-    openKcpPayment({
-      action: '/kcpPaypop.do',
-      fields: {
-        site_cd: 'B9999',
-        callback_url: 'https://www.gytennis.or.kr/cb',
-        noti_url: 'https://www.gytennis.or.kr/noti',
-        KCPRedirectURL: 'https://www.gytennis.or.kr/kcp-ret',
-        RETURN_URL: 'https://www.gytennis.or.kr/return',
-      },
+  it('모바일 흐름에서 features 인자 없음 (PC 팝업 사이즈 없음)', async () => {
+    await openKcpPayment({
+      action: 'https://spay.kcp.co.kr/kcpPaypop.do',
+      fields: { site_cd: 'A1234', ordr_idxx: 'ORDER002' },
     });
-
-    expect(capturedForm).not.toBeNull();
-    const form = capturedForm!;
-    const names = Array.from(form.querySelectorAll('input[type=hidden]')).map(i => (i as HTMLInputElement).name);
-
-    expect(names).not.toContain('callback_url');
-    expect(names).not.toContain('noti_url');
-    expect(names).not.toContain('KCPRedirectURL');
-    expect(names).not.toContain('RETURN_URL');
-    expect(names).toContain('m_redirect_url');
-    expect(names).toContain('site_cd');
-  });
-});
-
-describe('openKcpPayment mobile — 확장 REDIRECT_FIELDS strip (A1)', () => {
-  let capturedForm: HTMLFormElement | null = null;
-
-  beforeEach(() => {
-    capturedForm = null;
-    vi.stubGlobal('navigator', {
-      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
-      maxTouchPoints: 5,
-    });
-    vi.stubGlobal('location', { origin: 'https://booking.example.com' });
-    vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function(this: HTMLFormElement) {
-      capturedForm = this.cloneNode(true) as HTMLFormElement;
-    });
+    expect(openedFeatures).toBeUndefined();
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-    document.querySelectorAll('form').forEach(f => f.remove());
-  });
-
-  it('확장 redirect 변형 필드 모두 제거 (returnUrl, SuccessUrl, RedirectURL 등)', () => {
-    const extendedFields: Record<string, string> = {
-      site_cd: 'X0001',
-      ordr_idxx: 'ORDER-EXT',
-      returnUrl: 'https://www.gytennis.or.kr/r1',
-      ReturnUrl: 'https://www.gytennis.or.kr/r2',
-      retUrl: 'https://www.gytennis.or.kr/r3',
-      complete_url: 'https://www.gytennis.or.kr/c1',
-      CompleteUrl: 'https://www.gytennis.or.kr/c2',
-      success_url: 'https://www.gytennis.or.kr/s1',
-      SuccessUrl: 'https://www.gytennis.or.kr/s2',
-      fail_url: 'https://www.gytennis.or.kr/f1',
-      FailUrl: 'https://www.gytennis.or.kr/f2',
-      m_signal_url: 'https://www.gytennis.or.kr/sig',
-      notice_url: 'https://www.gytennis.or.kr/notice',
-      NoticeUrl: 'https://www.gytennis.or.kr/Notice',
-      redirect_url: 'https://www.gytennis.or.kr/redir',
-      RedirectURL: 'https://www.gytennis.or.kr/RedirURL',
-    };
-    openKcpPayment({ action: 'https://spay.kcp.co.kr/pay.do', fields: extendedFields });
-    expect(capturedForm).not.toBeNull();
-    const names = Array.from(capturedForm!.querySelectorAll('input[type=hidden]')).map(i => (i as HTMLInputElement).name);
-    const stripped = [
-      'returnUrl','ReturnUrl','retUrl','complete_url','CompleteUrl',
-      'success_url','SuccessUrl','fail_url','FailUrl',
-      'm_signal_url','notice_url','NoticeUrl','redirect_url','RedirectURL',
-    ];
-    for (const field of stripped) {
-      expect(names, `"${field}" should be stripped`).not.toContain(field);
-    }
-    // Our m_redirect_url is injected
-    expect(names).toContain('m_redirect_url');
-    const redir = capturedForm!.querySelector('input[name="m_redirect_url"]') as HTMLInputElement;
-    expect(redir.value).toContain('/payment-result');
-    expect(redir.value).toContain('ORDER-EXT');
-  });
-
-  it('m_redirect_url 단일 값으로 덮어쓰기 — 원본 gytennis URL 없음', () => {
-    openKcpPayment({
-      action: 'https://spay.kcp.co.kr/pay.do',
-      fields: {
-        site_cd: 'Y0001',
-        ordr_idxx: 'ORD-OVER',
-        m_redirect_url: 'https://www.gytennis.or.kr/MUST_BE_GONE',
-      },
+  it('반환값은 null (모바일 탭 추적 불가)', async () => {
+    const result = await openKcpPayment({
+      action: 'https://spay.kcp.co.kr/kcpPaypop.do',
+      fields: { site_cd: 'A1234', ordr_idxx: 'ORDER003' },
     });
-    expect(capturedForm).not.toBeNull();
-    const redirectInputs = Array.from(capturedForm!.querySelectorAll('input[name="m_redirect_url"]')) as HTMLInputElement[];
-    expect(redirectInputs).toHaveLength(1);
-    expect(redirectInputs[0].value).not.toContain('gytennis');
-    expect(redirectInputs[0].value).toContain('payment-result');
+    expect(result).toBeNull();
   });
 
-  it('pay_method 미입력 시 기본값 100000000000 폴백 유지', () => {
-    openKcpPayment({
-      action: 'https://spay.kcp.co.kr/pay.do',
-      fields: { site_cd: 'Z0001', ordr_idxx: 'ORD-PM' },
+  it('siteId 가 m_redirect_url(/api/kcp-return?site=gy) 에 포함되어 blob 생성됨', async () => {
+    // Intercept Blob constructor to capture HTML content
+    const capturedParts: string[] = [];
+    const OriginalBlob = globalThis.Blob;
+    vi.stubGlobal('Blob', class MockBlob extends OriginalBlob {
+      constructor(parts: BlobPart[], opts?: BlobPropertyBag) {
+        super(parts, opts);
+        if (typeof parts[0] === 'string') capturedParts.push(parts[0]);
+      }
     });
-    expect(capturedForm).not.toBeNull();
-    const pm = capturedForm!.querySelector('input[name="pay_method"]') as HTMLInputElement | null;
-    expect(pm?.value).toBe('100000000000');
+
+    await openKcpPayment(
+      { action: 'https://spay.kcp.co.kr/kcpPaypop.do', fields: { site_cd: 'A1234', ordr_idxx: 'ORDER004' } },
+      { siteId: 'gy' },
+    );
+    expect(capturedParts.length).toBeGreaterThan(0);
+    expect(capturedParts[0]).toContain('/api/kcp-return?site=gy');
   });
 });
 

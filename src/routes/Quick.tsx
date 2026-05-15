@@ -145,7 +145,6 @@ export default function Quick() {
       if (!isMobile()) setKcpReady({ orderId, kcp: result.kcp, slotRaw: s.raw });
       await openKcpPayment(result.kcp, {
         siteId: activeSiteId,
-        cookie: activeCookie,
         onWindowClosed: async () => {
           if (!payConfirmedRef.current) {
             const c = useAuthStore.getState().cookies[activeSiteId];
@@ -325,10 +324,8 @@ export default function Quick() {
               onClick={() => {
                 payConfirmedRef.current = false;
                 const { orderId, kcp, slotRaw } = kcpReady;
-                const c = useAuthStore.getState().cookies[activeSiteId];
                 void openKcpPayment(kcp, {
                   siteId: activeSiteId,
-                  cookie: c,
                   onWindowClosed: async () => {
                     if (!payConfirmedRef.current) {
                       const c = useAuthStore.getState().cookies[activeSiteId];

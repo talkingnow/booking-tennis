@@ -310,10 +310,8 @@ export default function Race() {
     if (!current) return;
     payConfirmedRef.current = false;
     const siteId = activeSiteIdRef.current;
-    const c = useAuthStore.getState().cookies[siteId];
     void openKcpPayment(current.kcp, {
       siteId,
-      cookie: c,
       onWindowClosed: async () => {
         if (!payConfirmedRef.current) {
           const siteId = activeSiteIdRef.current;

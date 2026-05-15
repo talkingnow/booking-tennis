@@ -7,14 +7,23 @@ import { isRegistered, getSite } from '@/lib/sites/registry';
 import { useSiteStore } from '@/stores/siteStore';
 import type { SiteId } from '@/lib/sites/types';
 
-type ResultState = 'pending' | 'success' | 'failure' | 'cancelled' | 'invalid' | 'no_response';
+type ResultState = 'pending' | 'rsvpy_success' | 'rsvpy_failure' | 'success' | 'failure' | 'cancelled' | 'invalid' | 'no_response';
+
+// Fields KCP sends back that gytennis /rsvPy needs
+const RSVPY_FIELDS = [
+  'enc_info', 'enc_data', 'ordr_idxx', 'good_name', 'good_mny',
+  'buyr_name', 'buyr_mail', 'pay_method', 'site_cd', 'res_cd', 'res_msg',
+  'tran_cd', 'partcanc_yn', 'card_cd', 'card_name', 'noinf_yn', 'quota',
+  'card_no', 'mcht_param', 'acnt_gb', 'bank_cd', 'bank_name', 'ipgm_date',
+  'allot_date', 'kcp_msg_id',
+];
 
 export default function PaymentResult() {
   const [params] = useSearchParams();
   const resCd = params.get('res_cd') ?? '';
   const resMsg = params.get('res_msg') ?? '';
-  const orderId = params.get('order_id') ?? '';
-  // site query param — set by handoff.ts in mobile redirect URL
+  const orderId = params.get('ordr_idxx') ?? params.get('order_id') ?? '';
+  const encInfo = params.get('enc_info') ?? '';
   const siteParam = params.get('site') ?? '';
 
   const [state, setState] = useState<ResultState>('pending');
@@ -23,13 +32,11 @@ export default function PaymentResult() {
 
   const { activeSiteId } = useSiteStore();
 
-  // Determine which site adapter to use for cancellation
   const resolvedSiteId: SiteId =
     siteParam === 'gy' || siteParam === 'pj'
       ? siteParam
       : activeSiteId;
 
-  // Determine site display name
   const siteName = resolvedSiteId === 'pj' ? '파주시' : '고양시';
 
   useEffect(() => {
@@ -41,34 +48,65 @@ export default function PaymentResult() {
       return;
     }
 
-    // No KCP params at all — KCP never redirected back (e.g. ordrErr before KCP entry)
-    if (!resCd && !params.get('pay_method') && !params.get('enc_info')) {
+    // No KCP params at all — KCP never redirected back
+    if (!resCd && !params.get('pay_method') && !encInfo) {
       setState('no_response');
       return;
     }
 
-    if (resCd === '0000') {
-      setState('success');
+    if (resCd !== '0000') {
+      // Payment failed — cancel the reserved slot
+      useAuthStore.getState().hydrate();
+      const cookie = useAuthStore.getState().cookies[resolvedSiteId];
+
+      if (cookie && isRegistered(resolvedSiteId)) {
+        const adapter = getSite(resolvedSiteId);
+        adapter.cancelReservation(orderId, cookie)
+          .then((ok) => {
+            if (!ok) setCancelError('예약 취소 요청에 실패했습니다. 직접 취소해 주세요.');
+          })
+          .catch(() => {
+            setCancelError('예약 취소 중 오류가 발생했습니다. 직접 취소해 주세요.');
+          })
+          .finally(() => setState('cancelled'));
+      } else {
+        setState('failure');
+      }
       return;
     }
 
-    // Payment failed — cancel the reserved slot
-    useAuthStore.getState().hydrate();
-    const cookie = useAuthStore.getState().cookies[resolvedSiteId];
+    // KCP success — if enc_info present, submit /rsvPy to confirm reservation
+    if (encInfo) {
+      useAuthStore.getState().hydrate();
+      const cookie = useAuthStore.getState().cookies[resolvedSiteId];
 
-    if (cookie && isRegistered(resolvedSiteId)) {
-      const adapter = getSite(resolvedSiteId);
-      adapter.cancelReservation(orderId, cookie)
-        .then((ok) => {
-          if (!ok) setCancelError('예약 취소 요청에 실패했습니다. 직접 취소해 주세요.');
+      const body = new URLSearchParams();
+      for (const field of RSVPY_FIELDS) {
+        const val = params.get(field);
+        if (val !== null) body.set(field, val);
+      }
+
+      const proxyBase = resolvedSiteId === 'pj' ? '/api/pj' : '/api/gy';
+      const reqHeaders: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      if (cookie) reqHeaders['X-GYT-Cookie'] = cookie;
+      fetch(`${proxyBase}/rsvPy`, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: body.toString(),
+      })
+        .then(async (res) => {
+          const html = await res.text().catch(() => '');
+          const isSuccess =
+            res.ok &&
+            (html.includes('예약이 완료') || html.includes('rsvRst') || html.includes('완료되었습니다'));
+          setState(isSuccess ? 'rsvpy_success' : 'rsvpy_failure');
         })
-        .catch(() => {
-          setCancelError('예약 취소 중 오류가 발생했습니다. 직접 취소해 주세요.');
-        })
-        .finally(() => setState('cancelled'));
-    } else {
-      setState('failure');
+        .catch(() => setState('rsvpy_failure'));
+      return;
     }
+
+    // KCP success without enc_info (legacy/PC flow)
+    setState('success');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -85,6 +123,42 @@ export default function PaymentResult() {
       <Card className="border border-yellow-700">
         <CardTitle>잘못된 접근</CardTitle>
         <p className="text-sm text-slate-400 mb-4">주문번호가 없거나 잘못된 URL입니다.</p>
+        <Link to="/">
+          <Button>홈으로</Button>
+        </Link>
+      </Card>
+    );
+  }
+
+  if (state === 'rsvpy_success') {
+    return (
+      <Card className="border border-green-700">
+        <CardTitle>✅ 결제 및 예약 완료</CardTitle>
+        {orderId && (
+          <p className="text-xs text-slate-400 mb-1">주문번호: {orderId}</p>
+        )}
+        <p className="text-sm text-green-300 mb-1">{siteName} 예약이 성공적으로 완료되었습니다.</p>
+        <p className="text-xs text-slate-400 mb-4">예약 확인은 {siteName} 사이트에서 확인해 주세요.</p>
+        <Link to="/">
+          <Button>홈으로</Button>
+        </Link>
+      </Card>
+    );
+  }
+
+  if (state === 'rsvpy_failure') {
+    return (
+      <Card className="border border-yellow-700">
+        <CardTitle>⚠️ 결제 완료 — 예약 확인 필요</CardTitle>
+        {orderId && (
+          <p className="text-xs text-slate-400 mb-1">주문번호: {orderId}</p>
+        )}
+        <p className="text-sm text-yellow-300 mb-2">
+          결제는 완료되었으나 예약 확정에 실패했습니다.
+        </p>
+        <p className="text-xs text-slate-400 mb-4">
+          {siteName} 사이트에서 예약 내역을 직접 확인해 주세요. 결제만 되고 예약이 없으면 고객센터에 문의하세요.
+        </p>
         <Link to="/">
           <Button>홈으로</Button>
         </Link>

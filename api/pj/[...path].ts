@@ -6,6 +6,7 @@ const ALLOWED_PATHS = [
   /^\/logOff$/,
   /^\/daily(\/\d+)?(\/\d{4}-\d{2}-\d{2})?$/,
   /^\/rsvConfirm$/,
+  /^\/rsvPy$/,
   /^\/rsvVf$/,
   /^\/rsvCls$/,
   /^\/myPage$/,
