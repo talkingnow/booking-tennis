@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore, selectMeta } from '@/stores/authStore';
+import { useSiteStore } from '@/stores/siteStore';
 import { useUiStore } from '@/stores/uiStore';
 import type { SiteId } from '@/lib/sites/types';
 import { isRegistered, getSite } from '@/lib/sites/registry';
@@ -35,9 +36,17 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
     ? getSite(siteId).config.name
     : siteId === 'pj' ? '파주시' : '고양시';
 
+  const setActiveSite = useSiteStore((s) => s.setActiveSite);
+
   const retry = useCallback(() => {
     useAuthStore.getState().validateAndLogin(siteId);
   }, [siteId]);
+
+  // Switch active site so /account opens for the clicked badge's site,
+  // not the currently-selected one in the top-right SiteSelector.
+  const goAccount = useCallback(() => {
+    setActiveSite(siteId);
+  }, [siteId, setActiveSite]);
 
   const { lastResult, lastValidatedAt, lastError } = meta;
 
@@ -52,7 +61,7 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
       return (
         <div className="flex items-center gap-2 text-sm text-amber-300">
           <span className="w-4 text-center">🔒</span>
-          <Link to="/account" className="underline hover:text-amber-200">
+          <Link to="/account" onClick={goAccount} className="underline hover:text-amber-200">
             {siteName} 수동 로그인 필요
           </Link>
         </div>
@@ -122,7 +131,7 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
     return (
       <div className="flex items-center gap-2 text-sm text-slate-500">
         <span className="w-4 text-center">+</span>
-        <Link to="/account" className="underline hover:text-slate-300">
+        <Link to="/account" onClick={goAccount} className="underline hover:text-slate-300">
           {siteName} 계정 미설정
         </Link>
       </div>
