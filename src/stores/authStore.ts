@@ -187,22 +187,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } catch {}
     }
     clearSession(siteId);
+    // BUG-11: reset meta on logout so LoginBadge doesn't show stale valid state
     set((state) => {
       const cookies = { ...state.cookies };
+      const meta = { ...state.meta };
       delete cookies[siteId];
-      return { cookies, busy: false };
+      delete meta[siteId];
+      return { cookies, busy: false, meta };
     });
   },
 
   forget: (siteId: SiteId) => {
     clearAccount(siteId);
     clearSession(siteId);
+    // BUG-11: clear meta on forget so LoginBadge clears immediately
     set((state) => {
       const accounts = { ...state.accounts };
       const cookies = { ...state.cookies };
+      const meta = { ...state.meta };
       delete accounts[siteId];
       delete cookies[siteId];
-      return { accounts, cookies };
+      delete meta[siteId];
+      return { accounts, cookies, meta };
     });
   },
 
@@ -265,6 +271,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return doLogin(siteId);
     }
     // expired but no stored credentials — clear stale session quietly
+    // BUG-7: use 'no_account' (not 'expired') so LoginBadge doesn't show misleading retry button
     clearSession(siteId);
     set((state) => {
       const c = { ...state.cookies };
@@ -273,7 +280,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         cookies: c,
         meta: {
           ...state.meta,
-          [siteId]: { lastValidatedAt: Date.now(), lastResult: 'expired' as SiteAuthResult },
+          [siteId]: { lastValidatedAt: Date.now(), lastResult: 'no_account' as SiteAuthResult },
         },
       };
     });

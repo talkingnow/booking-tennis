@@ -114,7 +114,7 @@ function defaultTargetDate_pj(): string {
 // ─── component ────────────────────────────────────────────────────────────────
 
 export default function Race() {
-  const { cookies, accounts, hydrate, busy } = useAuthStore();
+  const { cookies, accounts, doLogin, busy } = useAuthStore();
   const { activeSiteId } = useSiteStore();
   const setArmed = useUiStore((s) => s.setArmed);
 
@@ -192,7 +192,14 @@ export default function Race() {
   useEffect(() => { prioritiesRef.current = priorities; savePriorities(priorities); }, [priorities]);
   useEffect(() => { activeSiteIdRef.current = activeSiteId; }, [activeSiteId]);
 
-  useEffect(() => { hydrate(); }, [hydrate]);
+  // BUG-10: hydrate() removed — App.tsx handles it once at boot
+  // BUG-4: guard auto-login behind bootAutoLogin; OFF means user must log in manually
+  useEffect(() => {
+    if (!useUiStore.getState().bootAutoLogin) return;
+    if (!cookies[activeSiteId] && accounts[activeSiteId]) {
+      doLogin(activeSiteId);
+    }
+  }, [activeSiteId, cookies, accounts, doLogin]);
 
   const targetMs = useMemo(() => new Date(target).getTime(), [target]);
 

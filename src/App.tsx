@@ -10,27 +10,21 @@ import { DebugPanel } from './components/DebugPanel';
 import { useSiteStore } from './stores/siteStore';
 import { useAuthStore } from './stores/authStore';
 import { useUiStore } from './stores/uiStore';
+import { applyBootAutoLoginPolicy } from './lib/auth/applyBootAutoLogin';
 
 export default function App() {
   const loc = useLocation();
   const isHome = loc.pathname === '/';
   const { hydrate: hydrateSite } = useSiteStore();
-  const { hydrate: hydrateAuth, validateAndLogin, startKeepAlive, stopKeepAlive } = useAuthStore();
+  const { hydrate: hydrateAuth } = useAuthStore();
 
-  // Hydrate stores; boot-time auto-login only when user opted in
+  // Hydrate stores once; delegate auto-login policy to helper.
+  // startKeepAlive is managed inside applyBootAutoLoginPolicy — do NOT call it here.
   useEffect(() => {
     hydrateSite();
     hydrateAuth();
-    if (useUiStore.getState().bootAutoLogin) {
-      validateAndLogin('gy');
-      validateAndLogin('pj');
-    } else {
-      // Auto-login OFF: drop any restored session so UI reflects "logged out".
-      // localStorage cookies are preserved — toggling ON re-validates them.
-      useAuthStore.setState({ cookies: {} });
-    }
-    startKeepAlive();
-    return () => { stopKeepAlive(); };
+    applyBootAutoLoginPolicy(useUiStore.getState().bootAutoLogin);
+    return () => { useAuthStore.getState().stopKeepAlive(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore, selectMeta } from '@/stores/authStore';
+import { useUiStore } from '@/stores/uiStore';
 import type { SiteId } from '@/lib/sites/types';
 import { isRegistered, getSite } from '@/lib/sites/registry';
 
@@ -21,7 +22,7 @@ function maskId(id: string): string {
 export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
   const meta = useAuthStore(selectMeta(siteId));
   const account = useAuthStore((s) => s.accounts[siteId]);
-  const cookie = useAuthStore((s) => s.cookies[siteId]);
+  const bootAutoLogin = useUiStore((s) => s.bootAutoLogin);
   const [, tick] = useState(0);
 
   // Re-render every 30s to update relative time display
@@ -39,14 +40,43 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
   }, [siteId]);
 
   const { lastResult, lastValidatedAt, lastError } = meta;
-  const timeLabel = relativeTime(lastValidatedAt);
-
-  const isActuallyValid = !!cookie && lastResult !== 'expired' && lastResult !== 'error' && lastResult !== 'validating';
 
   // Hide if never touched and no account configured — avoid noise for single-site users
-  if (lastResult === 'idle' && !account && !cookie) return null;
+  if (lastResult === 'idle' && !account) return null;
 
-  if (isActuallyValid || lastResult === 'valid') {
+  const timeLabel = relativeTime(lastValidatedAt);
+
+  if (lastResult === 'idle') {
+    // BUG-5: account exists but auto-login OFF → show manual login prompt, not "확인 중…"
+    if (account && !bootAutoLogin) {
+      return (
+        <div className="flex items-center gap-2 text-sm text-amber-300">
+          <span className="w-4 text-center">🔒</span>
+          <Link to="/account" className="underline hover:text-amber-200">
+            {siteName} 수동 로그인 필요
+          </Link>
+        </div>
+      );
+    }
+    // bootAutoLogin ON (or no account) — show spinner
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <span className="w-4 text-center">·</span>
+        <span>{siteName} 확인 중…</span>
+      </div>
+    );
+  }
+
+  if (lastResult === 'validating') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-400">
+        <span className="w-4 text-center animate-spin">↻</span>
+        <span>{siteName} 로그인 중…</span>
+      </div>
+    );
+  }
+
+  if (lastResult === 'valid') {
     return (
       <div className="flex items-center gap-2 text-sm text-green-400">
         <span className="w-4 text-center">✓</span>
@@ -54,23 +84,6 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
           {siteName} 로그인됨{account ? ` ${maskId(account.id)}` : ''}
         </span>
         {timeLabel && <span className="text-xs text-slate-500">{timeLabel}</span>}
-      </div>
-    );
-  }
-
-  if (lastResult === 'idle') {
-    if (!cookie && account) {
-      return (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <span className="w-4 text-center">·</span>
-          <span>{siteName} 미로그인</span>
-        </div>
-      );
-    }
-    return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <span className="w-4 text-center">·</span>
-        <span>{siteName} 확인 중…</span>
       </div>
     );
   }
@@ -105,13 +118,17 @@ export function LoginBadge({ siteId }: { siteId: SiteId }): JSX.Element | null {
     );
   }
 
-  // no_account
-  return (
-    <div className="flex items-center gap-2 text-sm text-slate-500">
-      <span className="w-4 text-center">+</span>
-      <Link to="/account" className="underline hover:text-slate-300">
-        {siteName} 계정 미설정
-      </Link>
-    </div>
-  );
+  if (lastResult === 'no_account') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <span className="w-4 text-center">+</span>
+        <Link to="/account" className="underline hover:text-slate-300">
+          {siteName} 계정 미설정
+        </Link>
+      </div>
+    );
+  }
+
+  // F5: exhaustive over SiteAuthResult — all 6 branches handled above. Render nothing for unknown.
+  return null;
 }
