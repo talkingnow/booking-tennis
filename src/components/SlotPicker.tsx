@@ -11,6 +11,8 @@ type Props = {
   siteId?: SiteId;
   /** Explicit hour rows. Overrides site policy derivation. */
   hours?: number[];
+  /** When >1, highlights same-court adjacent slots after first selection. Default 1. */
+  maxSelectable?: number;
 };
 
 const statusStyle: Record<Slot['status'], string> = {
@@ -42,7 +44,7 @@ function label(s: Slot): string {
  *   columns = court face number (1코트, 2코트, ...)
  *   rows    = 2-hour time buckets (06~08, 08~10, ...)
  */
-export function SlotPicker({ slots, selected, onToggle, siteId = 'gy', hours }: Props) {
+export function SlotPicker({ slots, selected, onToggle, siteId = 'gy', hours, maxSelectable = 1 }: Props) {
   const hourBuckets = useMemo(() => {
     if (hours?.length) return hours;
     if (isRegistered(siteId)) {
@@ -63,6 +65,25 @@ export function SlotPicker({ slots, selected, onToggle, siteId = 'gy', hours }: 
 
   const courtNos = Array.from(new Set(slots.map((s) => s.courtNo))).sort((a, b) => a - b);
   const isSelected = (s: Slot) => selected.some((x) => x.raw === s.raw);
+
+  // When maxSelectable > 1 and exactly one slot is selected, highlight same-court adjacent available slots.
+  const adjacentHighlightRaws = useMemo<Set<string>>(() => {
+    if (maxSelectable <= 1 || selected.length !== 1) return new Set();
+    const first = selected[0];
+    const adj = new Set<string>();
+    for (const s of slots) {
+      if (
+        s.courtNo === first.courtNo &&
+        s.status === 'available' &&
+        Math.abs(s.hour - first.hour) === slotDuration
+      ) {
+        adj.add(s.raw);
+      }
+    }
+    return adj;
+  }, [maxSelectable, selected, slots, slotDuration]);
+
+  const isAdjacent = (s: Slot) => adjacentHighlightRaws.has(s.raw);
 
   return (
     <div className="overflow-x-auto -mx-2">
@@ -98,6 +119,7 @@ export function SlotPicker({ slots, selected, onToggle, siteId = 'gy', hours }: 
                   );
                 }
                 const sel = isSelected(s);
+                const adj = !sel && isAdjacent(s);
                 const clickable = s.status === 'available';
                 return (
                   <td key={no} className="p-0">
@@ -107,7 +129,7 @@ export function SlotPicker({ slots, selected, onToggle, siteId = 'gy', hours }: 
                       disabled={!clickable}
                       className={`w-full h-10 rounded border ${statusStyle[s.status]} ${
                         sel ? '!border-accent !bg-accent !text-bg font-semibold' : ''
-                      }`}
+                      } ${adj ? 'ring-2 ring-yellow-400/40' : ''}`}
                       title={label(s)}
                     >
                       {sel ? '✓' : glyph(s)}

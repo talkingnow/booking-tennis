@@ -29,6 +29,10 @@ export type SlotGridProps = {
   loading?: boolean;
   /** Explicit hour rows. Defaults to site policy.hours range, or slots distinct. */
   hours?: number[];
+  /** Raw keys of currently selected slots (highlighted as chosen). */
+  selectedSlots?: Set<string>;
+  /** Raw keys of adjacent-highlight slots (ring hint for next selection). */
+  adjacentSlots?: Set<string>;
 };
 
 function effectiveStatus(slot: Slot, pendingSlots: Set<string>): SlotStatus {
@@ -56,7 +60,7 @@ function cellLabel(status: SlotStatus): string {
   }
 }
 
-export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set(), onSlotClick, loading, hours }: SlotGridProps) {
+export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set(), onSlotClick, loading, hours, selectedSlots = new Set(), adjacentSlots = new Set() }: SlotGridProps) {
   // Dynamic hour rows: explicit prop > site policy > distinct from slots
   const slotHours = useMemo(() => {
     if (hours?.length) return hours;
@@ -126,15 +130,17 @@ export function SlotGrid({ courtId, slots, siteId = 'gy', pendingSlots = new Set
                 }
                 const status = effectiveStatus(slot, pendingSlots);
                 const clickable = status === 'available' && !!onSlotClick;
+                const isSel = selectedSlots.has(slot.raw);
+                const isAdj = !isSel && adjacentSlots.has(slot.raw);
                 return (
                   <td key={courtNo} className="min-h-[44px] min-w-[48px] text-center">
                     <button
-                      className={`min-h-[44px] min-w-[48px] w-full flex items-center justify-center rounded text-base font-bold transition-colors ${cellClass(status)}`}
+                      className={`min-h-[44px] min-w-[48px] w-full flex items-center justify-center rounded text-base font-bold transition-colors ${cellClass(status)} ${isSel ? '!bg-accent !text-bg !border-accent' : ''} ${isAdj ? 'ring-2 ring-yellow-400/40' : ''}`}
                       disabled={!clickable}
                       onClick={clickable ? () => onSlotClick!(slot) : undefined}
                       aria-label={`${courtNo}번 코트 ${hour}시 ${status}`}
                     >
-                      {cellLabel(status)}
+                      {isSel ? '✓' : cellLabel(status)}
                     </button>
                   </td>
                 );

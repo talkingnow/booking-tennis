@@ -2,8 +2,14 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'));
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     react(),
     VitePWA({
@@ -26,7 +32,9 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        // /kcp-pay.html is a real static page (KCP SDK host) — must NOT fall
+        // back to the SPA shell, or document.location would be the SPA route.
+        navigateFallbackDenylist: [/^\/api\//, /^\/kcp-pay\.html$/],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
@@ -55,6 +63,6 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', '.claude/**'],
+    exclude: ['node_modules/**', 'dist/**', '.claude/**', '.git/**'],
   },
 });

@@ -7,6 +7,7 @@ import { PolicyNotice } from '@/components/PolicyNotice';
 import { useAuthStore } from '@/stores/authStore';
 import { useSiteStore } from '@/stores/siteStore';
 import { getSite, isRegistered } from '@/lib/sites/registry';
+import { getDateBounds } from '@/lib/sites/dateRange';
 import { getCourt } from '@/lib/courts';
 import { formatRemaining, startCountdown, type CountdownHandle } from '@/lib/scheduler/countdown';
 import { measureServerOffsetMs } from '@/lib/scheduler/timeSync';
@@ -23,8 +24,9 @@ export type PriorityEntry = {
   id: string;
   courtId: number;
   courtNo: number;
-  date: string;   // YYYY-MM-DD
-  hour: number;   // slot start hour
+  date: string;    // YYYY-MM-DD
+  /** Length 1 (gy) or 1~2 consecutive hours (pj). Sorted ascending. */
+  hours: number[];
 };
 
 type CascadeResult = {
@@ -39,10 +41,30 @@ const PRIORITY_KEY = 'gyt:priorities';
 
 // ─── storage helpers ──────────────────────────────────────────────────────────
 
+export function migratePriorityEntry(e: unknown): PriorityEntry | null {
+  if (!e || typeof e !== 'object') return null;
+  const r = e as Record<string, unknown>;
+  if (!r.id || typeof r.courtId !== 'number' || typeof r.courtNo !== 'number' || !r.date) return null;
+  if (Array.isArray(r.hours)) return r as unknown as PriorityEntry;
+  if (typeof r.hour === 'number') {
+    const { hour: _, ...rest } = r;
+    return { ...rest, hours: [r.hour as number] } as PriorityEntry;
+  }
+  return null;
+}
+
 function loadPriorities(): PriorityEntry[] {
   try {
     const raw = localStorage.getItem(PRIORITY_KEY);
-    return raw ? (JSON.parse(raw) as PriorityEntry[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown[];
+    if (!Array.isArray(parsed)) return [];
+    const migrated = parsed.map(migratePriorityEntry).filter((e): e is PriorityEntry => e !== null);
+    // Persist migration immediately if any entry changed
+    if (migrated.some((e, i) => JSON.stringify(e) !== JSON.stringify(parsed[i]))) {
+      try { localStorage.setItem(PRIORITY_KEY, JSON.stringify(migrated)); } catch {}
+    }
+    return migrated;
   } catch { return []; }
 }
 
@@ -143,7 +165,11 @@ export default function Race() {
   const [newCourtId, setNewCourtId] = useState(() => courts[0]?.id ?? 1);
   const [newCourtNo, setNewCourtNo] = useState(() => courts[0]?.courtNos[0] ?? 1);
   const [newDate, setNewDate]       = useState(defaultDate());
-  const [newHour, setNewHour]       = useState(SLOT_HOURS[SLOT_HOURS.length > 4 ? 2 : 0] ?? 12);
+  const [newHours, setNewHours]     = useState<number[]>([SLOT_HOURS[SLOT_HOURS.length > 4 ? 2 : 0] ?? 12]);
+
+  const maxConsecutive = policy?.maxConsecutiveSlots ?? 1;
+  const slotStep = policy?.hourStep ?? 1;
+  const bounds = useMemo(() => isRegistered(activeSiteId) ? getDateBounds(activeSiteId) : null, [activeSiteId]);
 
   // Default fire time depends on site
   const [target, setTarget] = useState(() =>
@@ -158,7 +184,8 @@ export default function Race() {
       setNewCourtId(firstCourt.id);
       setNewCourtNo(firstCourt.courtNos[0] ?? 1);
     }
-  }, [activeSiteId, courts]);
+    setNewHours([SLOT_HOURS[SLOT_HOURS.length > 4 ? 2 : 0] ?? 12]);
+  }, [activeSiteId, courts, SLOT_HOURS]);
 
   // phase / scheduler
   const [phase, setPhase]       = useState<Phase>('setup');
@@ -202,11 +229,32 @@ export default function Race() {
   // ── priority list helpers ──────────────────────────────────────────────────
 
   const addPriority = () => {
+    const sortedHours = [...newHours].sort((a, b) => a - b);
     const entry: PriorityEntry = {
       id: `${Date.now()}-${Math.random()}`,
-      courtId: newCourtId, courtNo: newCourtNo, date: newDate, hour: newHour,
+      courtId: newCourtId, courtNo: newCourtNo, date: newDate, hours: sortedHours,
     };
     setPriorities((p) => [...p, entry]);
+  };
+
+  const toggleNewHour = (h: number) => {
+    setNewHours((prev) => {
+      if (prev.includes(h)) {
+        // Always keep at least 1
+        const next = prev.filter((x) => x !== h);
+        return next.length ? next : prev;
+      }
+      if (prev.length >= maxConsecutive) {
+        // Replace first with new
+        return [h];
+      }
+      // Only allow adjacent (consecutive step)
+      if (prev.length === 1 && Math.abs(h - prev[0]) === slotStep) {
+        return [prev[0], h].sort((a, b) => a - b);
+      }
+      // New non-adjacent selection → restart
+      return [h];
+    });
   };
 
   const removePriority = (id: string) => setPriorities((p) => p.filter((e) => e.id !== id));
@@ -324,19 +372,20 @@ export default function Race() {
     while (idx < pList.length) {
       const entry = pList[idx];
       const view = await adapter.getDaily(entry.courtId, c, entry.date);
-      const slot = view?.slots.find(
-        (s) => s.courtNo === entry.courtNo && s.hour === entry.hour && s.status === 'available',
+      // All hours in the entry must be available
+      const matchedSlots = entry.hours.map((h) =>
+        view?.slots.find((s) => s.courtNo === entry.courtNo && s.hour === h && s.status === 'available'),
       );
-
-      if (!slot) {
+      if (matchedSlots.some((s) => !s) || matchedSlots.length !== entry.hours.length) {
         pushCascadeResult({ entry, status: 'no_slot' });
         idx++;
         cascadeIdxRef.current = idx;
         setCascadeIdx(idx);
         continue;
       }
+      const slotsToBook = matchedSlots as NonNullable<typeof matchedSlots[0]>[];
 
-      const result = await adapter.submitReservation([slot], c);
+      const result = await adapter.submitReservation(slotsToBook, c);
 
       if (result.ok && result.kcp) {
         pushCascadeResult({ entry, status: 'success', orderId: result.orderId });
@@ -461,7 +510,9 @@ export default function Race() {
                       <span className="text-slate-400 ml-1">{e.courtNo}번면</span>
                       <span className="text-slate-400 ml-1">·</span>
                       <span className="text-slate-400 ml-1">{e.date}</span>
-                      <span className="text-accent ml-1 font-mono">{String(e.hour).padStart(2,'0')}:00</span>
+                      <span className="text-accent ml-1 font-mono">
+                        {e.hours.map((h) => `${String(h).padStart(2,'0')}:00`).join(',')}
+                      </span>
                     </span>
                     <button onClick={() => movePriority(i, -1)} disabled={i === 0}
                       className="text-slate-400 hover:text-slate-200 disabled:opacity-25 min-w-[28px] min-h-[36px] text-center">▲</button>
@@ -504,8 +555,10 @@ export default function Race() {
                   <label className="block text-xs text-slate-500 mb-1">날짜</label>
                   <div className="flex gap-1">
                     <input type="date" value={newDate}
+                      min={bounds?.min}
+                      max={bounds?.max}
                       onChange={(e) => setNewDate(e.target.value)}
-                      className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs"
+                      className={`flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-slate-900 border text-xs ${newDate < (bounds?.min ?? '') || newDate > (bounds?.max ?? '9999') ? 'border-red-500' : 'border-slate-700'}`}
                     />
                     <button
                       type="button"
@@ -514,17 +567,46 @@ export default function Race() {
                       title="다음달 오늘"
                     >+1달</button>
                   </div>
+                  {bounds && (newDate < bounds.min || newDate > bounds.max) && (
+                    <p className="text-xs text-red-400 mt-1">
+                      {bounds.min} ~ {bounds.max} 사이의 날짜를 선택해주세요
+                    </p>
+                  )}
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">시간</label>
-                  <select value={newHour}
-                    onChange={(e) => setNewHour(Number(e.target.value))}
-                    className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs"
-                  >
-                    {SLOT_HOURS.map((h) => (
-                      <option key={h} value={h}>{String(h).padStart(2,'0')}:00</option>
-                    ))}
-                  </select>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    시간{maxConsecutive > 1 ? ` (최대 ${maxConsecutive}개 연속)` : ''}
+                  </label>
+                  {maxConsecutive <= 1 ? (
+                    <select value={newHours[0]}
+                      onChange={(e) => setNewHours([Number(e.target.value)])}
+                      className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs"
+                    >
+                      {SLOT_HOURS.map((h) => (
+                        <option key={h} value={h}>{String(h).padStart(2,'0')}:00</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {SLOT_HOURS.map((h) => {
+                        const checked = newHours.includes(h);
+                        return (
+                          <button
+                            key={h}
+                            type="button"
+                            onClick={() => toggleNewHour(h)}
+                            className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
+                              checked
+                                ? 'bg-accent text-bg font-semibold'
+                                : 'bg-slate-900 border border-slate-700 text-slate-300 hover:border-slate-500'
+                            }`}
+                          >
+                            {String(h).padStart(2,'0')}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
               <Button variant="secondary" onClick={addPriority} className="w-full">
@@ -663,7 +745,7 @@ export default function Race() {
                     <span className={r.status === 'success' ? 'text-green-400' : 'text-red-400'}>
                       {r.status === 'success' ? '✓' : r.status === 'failed' ? '✗' : '–'}
                     </span>
-                    <span className="text-slate-300">{court?.name} {r.entry.courtNo}번 {r.entry.hour}:00</span>
+                    <span className="text-slate-300">{court?.name} {r.entry.courtNo}번 {r.entry.hours.map((h) => `${h}:00`).join(',')}</span>
                     {r.status !== 'success' && (
                       <span className="text-slate-500">
                         {r.status === 'failed' ? '예약실패' : '슬롯없음'}
@@ -694,7 +776,7 @@ export default function Race() {
                     {r.status === 'success' ? '✓ 성공' : r.status === 'failed' ? '✗ 실패' : '– 슬롯없음'}
                   </span>
                   <span className="text-slate-300 text-xs">
-                    {court?.name} {r.entry.courtNo}번면 {r.entry.hour}:00 ({r.entry.date})
+                    {court?.name} {r.entry.courtNo}번면 {r.entry.hours.map((h) => `${h}:00`).join(',')} ({r.entry.date})
                   </span>
                 </div>
               );

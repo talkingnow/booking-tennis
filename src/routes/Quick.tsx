@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -9,10 +9,16 @@ import { useFavoritesStore } from '@/stores/favoritesStore';
 import { useSiteStore } from '@/stores/siteStore';
 import { useUiStore } from '@/stores/uiStore';
 import { getSite, isRegistered } from '@/lib/sites/registry';
-import { openKcpPayment } from '@/lib/payment/handoff';
+import { getDateBounds } from '@/lib/sites/dateRange';
+import { openKcpPayment, isMobile } from '@/lib/payment/handoff';
 import { courtName } from '@/lib/courts';
 import { SlotGrid } from '@/components/SlotGrid';
 import type { DailyView, Slot, KcpForm } from '@/lib/gytennis/types';
+
+/** Returns true when two slots are adjacent (same hour step apart) on the same court. */
+export function isAdjacentSlot(a: Slot, b: Slot, step: number): boolean {
+  return a.courtNo === b.courtNo && a.courtId === b.courtId && Math.abs(a.hour - b.hour) === step;
+}
 
 export default function Quick() {
   // F2: individual selectors (mirrors Account.tsx BUG-6 fix) — avoid whole-store subscription
@@ -27,20 +33,14 @@ export default function Quick() {
   const account = accounts[activeSiteId] ?? null;
   const cookie = cookies[activeSiteId] ?? null;
 
-  const getLocalDateString = (d: Date = new Date()) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
-
-  const [date, setDate] = useState(() => getLocalDateString());
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [data, setData] = useState<Map<number, DailyView | null>>(new Map());
   const [loading, setLoading] = useState(false);
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingSlots, setPendingSlots] = useState<Set<string>>(new Set());
-  const [confirmSlot, setConfirmSlot] = useState<Slot | null>(null);
+  const [confirmSlots, setConfirmSlots] = useState<Slot[]>([]);
+  const [selected, setSelected] = useState<Slot[]>([]);
   const [favOpen, setFavOpen] = useState(false);
   const [kcpReady, setKcpReady] = useState<{ orderId: string; kcp: KcpForm; slotRaw: string } | null>(null);
   const payConfirmedRef = useRef(false);
@@ -66,6 +66,7 @@ export default function Quick() {
     setPendingSlots(new Set());
     setKcpReady(null);
     setFailedCourts(new Set());
+    setSelected([]);
   }, [activeSiteId]);
 
   // Open favorites panel when no favorites for this site
@@ -78,6 +79,51 @@ export default function Quick() {
   const adapter = isRegistered(activeSiteId) ? getSite(activeSiteId) : null;
   const courts = adapter?.courts ?? [];
   const policy = adapter?.config.policy;
+
+  const maxConsecutive = policy?.maxConsecutiveSlots ?? 1;
+  const slotStep = policy?.hourStep ?? 1;
+  const bounds = useMemo(() => isRegistered(activeSiteId) ? getDateBounds(activeSiteId) : null, [activeSiteId]);
+  const dateOutOfRange = bounds ? (date < bounds.min || date > bounds.max) : false;
+
+  // Derived sets for SlotGrid highlighting
+  const selectedRaws = useMemo(() => new Set(selected.map((s) => s.raw)), [selected]);
+  const adjacentRaws = useMemo<Set<string>>(() => {
+    if (maxConsecutive <= 1 || selected.length !== 1) return new Set();
+    const first = selected[0];
+    const adj = new Set<string>();
+    for (const view of data.values()) {
+      if (!view) continue;
+      for (const s of view.slots) {
+        if (isAdjacentSlot(first, s, slotStep) && s.status === 'available') {
+          adj.add(s.raw);
+        }
+      }
+    }
+    return adj;
+  }, [maxConsecutive, selected, data, slotStep]);
+
+  const handleSlotClick = (s: Slot) => {
+    if (busySlot === s.raw) return;
+    if (maxConsecutive <= 1) {
+      // gy: immediate confirm
+      setConfirmSlots([s]);
+      return;
+    }
+    // pj multi-slot logic
+    setSelected((prev) => {
+      if (prev.length === 0) return [s];
+      // Deselect if already selected
+      if (prev.some((x) => x.raw === s.raw)) {
+        return prev.filter((x) => x.raw !== s.raw);
+      }
+      if (prev.length === 1 && isAdjacentSlot(prev[0], s, slotStep)) {
+        // Adjacent + same court → add, sort by hour
+        return [prev[0], s].sort((a, b) => a.hour - b.hour);
+      }
+      // Different court / non-adjacent / 3rd click → new start
+      return [s];
+    });
+  };
 
   const favCourtIds = Array.from(new Set(favList.map((f) => f.courtId)));
   const courtIds = favCourtIds.length ? favCourtIds : courts.map((c) => c.id);
@@ -125,14 +171,15 @@ export default function Quick() {
     if (view === null) setFailedCourts((prev) => new Set([...prev, courtId]));
   };
 
-  const reserve = async (s: Slot) => {
-    if (!adapter) return;
+  const reserve = async (slots: Slot[]) => {
+    if (!adapter || slots.length === 0) return;
+    const primarySlot = slots[0];
     let activeCookie = useAuthStore.getState().cookies[activeSiteId];
     if (!activeCookie) return;
-    setBusySlot(s.raw);
+    setBusySlot(primarySlot.raw);
     setError(null);
 
-    let result = await adapter.submitReservation([s], activeCookie);
+    let result = await adapter.submitReservation(slots, activeCookie);
 
     if (!result.ok && result.reason === 'not_logged_in' && account) {
       const ok = await doLogin(activeSiteId);
@@ -141,11 +188,12 @@ export default function Quick() {
         const map = await adapter.getDailyBatch(courtIds, activeCookie, date);
         setData(map);
         const allSlots = Array.from(map.values()).flatMap((v) => v?.slots ?? []);
-        const fresh = allSlots.find(
-          (t) => t.courtId === s.courtId && t.courtNo === s.courtNo && t.hour === s.hour,
-        );
-        if (fresh && fresh.status === 'available') {
-          result = await adapter.submitReservation([fresh], activeCookie);
+        // Re-find each slot by courtId/courtNo/hour
+        const freshSlots = slots.map((s) =>
+          allSlots.find((t) => t.courtId === s.courtId && t.courtNo === s.courtNo && t.hour === s.hour),
+        ).filter((t): t is Slot => !!t && t.status === 'available');
+        if (freshSlots.length === slots.length) {
+          result = await adapter.submitReservation(freshSlots, activeCookie);
         }
       }
     }
@@ -155,8 +203,8 @@ export default function Quick() {
     if (result.ok && result.kcp) {
       const orderId = result.orderId!;
       payConfirmedRef.current = false;
-      setPendingSlots((prev) => new Set([...prev, s.raw]));
-      setKcpReady({ orderId, kcp: result.kcp, slotRaw: s.raw });
+      setPendingSlots((prev) => new Set([...prev, ...slots.map((s) => s.raw)]));
+      if (!isMobile()) setKcpReady({ orderId, kcp: result.kcp, slotRaw: primarySlot.raw });
       await openKcpPayment(result.kcp, {
         siteId: activeSiteId,
         onWindowClosed: async () => {
@@ -164,7 +212,11 @@ export default function Quick() {
             const c = useAuthStore.getState().cookies[activeSiteId];
             if (c) await adapter.cancelReservation(orderId, c);
             setKcpReady(null);
-            setPendingSlots((prev) => { const n = new Set(prev); n.delete(s.raw); return n; });
+            setPendingSlots((prev) => {
+              const n = new Set(prev);
+              slots.forEach((s) => n.delete(s.raw));
+              return n;
+            });
             setError('결제창이 닫혔습니다. 예약이 취소되었습니다.');
           } else {
             setKcpReady(null);
@@ -173,7 +225,7 @@ export default function Quick() {
       });
     } else if (!result.ok) {
       if (result.reason === 'payment_in_progress') {
-        setPendingSlots((prev) => new Set([...prev, s.raw]));
+        setPendingSlots((prev) => new Set([...prev, ...slots.map((s) => s.raw)]));
         setError('슬롯이 결제 진행 중 상태입니다.');
       } else {
         setError(`예약 실패: ${result.reason}`);
@@ -197,28 +249,6 @@ export default function Quick() {
 
   // Hour range for display
   const [startHour, endHour] = policy?.hours ?? [6, 22];
-
-  const minDate = getLocalDateString(new Date());
-  let maxDate = '';
-
-  if (activeSiteId === 'pj') {
-    const maxD = new Date();
-    maxD.setDate(maxD.getDate() + 6);
-    maxDate = getLocalDateString(maxD);
-  } else if (activeSiteId === 'gy') {
-    const today = new Date();
-    const maxD = new Date(today.getFullYear(), today.getMonth() + (today.getDate() >= 25 ? 2 : 1), 0);
-    maxDate = getLocalDateString(maxD);
-  }
-
-  // Effect to clamp date when site changes or today rolls over
-  useEffect(() => {
-    if (date < minDate) {
-      setDate(minDate);
-    } else if (maxDate && date > maxDate) {
-      setDate(maxDate);
-    }
-  }, [date, minDate, maxDate]);
 
   return (
     <div className="space-y-4">
@@ -311,12 +341,17 @@ export default function Quick() {
             <label className="block text-xs text-slate-400 mb-1">조회 날짜</label>
             <input
               type="date"
-              min={minDate}
-              max={maxDate || undefined}
               value={date}
+              min={bounds?.min}
+              max={bounds?.max}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
+              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-sm ${dateOutOfRange ? 'border-red-500' : 'border-slate-700'}`}
             />
+            {dateOutOfRange && bounds && (
+              <p className="text-xs text-red-400 mt-1">
+                {bounds.min} ~ {bounds.max} 사이의 날짜를 선택해주세요
+              </p>
+            )}
           </div>
           <Button
             variant="secondary"
@@ -362,7 +397,7 @@ export default function Quick() {
               onClick={() => {
                 payConfirmedRef.current = false;
                 const { orderId, kcp, slotRaw } = kcpReady;
-                openKcpPayment(kcp, {
+                void openKcpPayment(kcp, {
                   siteId: activeSiteId,
                   onWindowClosed: async () => {
                     if (!payConfirmedRef.current) {
@@ -420,28 +455,59 @@ export default function Quick() {
                 slots={view.slots}
                 pendingSlots={pendingSlots}
                 loading={loading && !view}
-                onSlotClick={(s) => {
-                  if (busySlot !== s.raw) setConfirmSlot(s);
-                }}
+                onSlotClick={handleSlotClick}
+                selectedSlots={selectedRaws}
+                adjacentSlots={adjacentRaws}
               />
             )}
           </Card>
         );
       })}
 
+      {/* Multi-slot confirm button (pj only) */}
+      {maxConsecutive > 1 && selected.length > 0 && (
+        <div className="fixed bottom-6 left-0 right-0 flex justify-center px-4 z-20">
+          <div className="bg-slate-900 border border-accent rounded-xl px-4 py-3 shadow-xl flex items-center gap-3 max-w-sm w-full">
+            <div className="flex-1 text-sm">
+              {selected.length === 1
+                ? `${courtName(activeSiteId, selected[0].courtId)} ${selected[0].courtNo}번 ${selected[0].hour}시 선택됨 — 인접 시간을 추가로 선택하세요`
+                : `${courtName(activeSiteId, selected[0].courtId)} ${selected[0].courtNo}번 ${selected.map((s) => s.hour).join(',')}시 (${selected.length}시간)`}
+            </div>
+            <Button
+              className="shrink-0 px-3 py-1.5 text-sm"
+              onClick={() => {
+                const slotsToReserve = [...selected];
+                setSelected([]);
+                setConfirmSlots(slotsToReserve);
+              }}
+              disabled={selected.length < maxConsecutive}
+            >
+              예약
+            </Button>
+            <Button
+              variant="secondary"
+              className="shrink-0 px-3 py-1.5 text-sm"
+              onClick={() => setSelected([])}
+            >
+              취소
+            </Button>
+          </div>
+        </div>
+      )}
+
       <ConfirmDialog
-        open={confirmSlot !== null}
+        open={confirmSlots.length > 0}
         message={
-          confirmSlot
-            ? `${courtName(activeSiteId, confirmSlot.courtId)} ${confirmSlot.courtNo}번 코트 ${confirmSlot.hour}시 슬롯을 예약하시겠습니까?`
+          confirmSlots.length > 0
+            ? `${courtName(activeSiteId, confirmSlots[0].courtId)} ${confirmSlots[0].courtNo}번 코트 ${confirmSlots.map((s) => s.hour).join(',')}시 (${confirmSlots.length}시간) 예약하시겠습니까?`
             : ''
         }
         onConfirm={() => {
-          const s = confirmSlot;
-          setConfirmSlot(null);
-          if (s) reserve(s);
+          const slots = [...confirmSlots];
+          setConfirmSlots([]);
+          if (slots.length > 0) reserve(slots);
         }}
-        onCancel={() => setConfirmSlot(null)}
+        onCancel={() => setConfirmSlots([])}
       />
     </div>
   );

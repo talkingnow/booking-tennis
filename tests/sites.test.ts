@@ -66,6 +66,22 @@ describe('SitePolicy constants', () => {
     expect(PJ_POLICY.notes.length).toBeGreaterThan(0);
   });
 
+  it('GY_POLICY.maxConsecutiveSlots === 1 (single-slot only)', () => {
+    expect(GY_POLICY.maxConsecutiveSlots).toBe(1);
+  });
+
+  it('PJ_POLICY.maxConsecutiveSlots === 2 (consecutive pair allowed)', () => {
+    expect(PJ_POLICY.maxConsecutiveSlots).toBe(2);
+  });
+
+  it('GY_POLICY.advanceMinDays === 0 (today bookable)', () => {
+    expect(GY_POLICY.advanceMinDays).toBe(0);
+  });
+
+  it('PJ_POLICY.advanceMinDays === 0 (today bookable, pending live confirm)', () => {
+    expect(PJ_POLICY.advanceMinDays).toBe(0);
+  });
+
   it('PJ_POLICY.hourlyFee is defined with weekday/weekend tiers', () => {
     expect(PJ_POLICY.hourlyFee).toBeDefined();
     expect(PJ_POLICY.hourlyFee!.weekday.day).toBe(3000);

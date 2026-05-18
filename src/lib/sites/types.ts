@@ -25,6 +25,10 @@ export type SitePolicy = {
   perCourtMaxSlots: number;
   /** Days in advance bookable */
   bookableDays: number;
+  /** Max consecutive slots selectable per booking (1 = single-slot only). */
+  maxConsecutiveSlots: number;
+  /** D-day floor: 0 = today bookable. Combine with bookableDays for date range. */
+  advanceMinDays: number;
   /** Free-text policy lines shown in PolicyNotice */
   notes: string[];
   /** Optional hourly fee table (KRW per hour). null = dynamic / unknown */
@@ -80,6 +84,8 @@ export const GY_POLICY: SitePolicy = {
   dailyMaxSlots: 0, // dynamic (data-sot)
   perCourtMaxSlots: 0, // dynamic (data-soc)
   bookableDays: 21,
+  maxConsecutiveSlots: 1,
+  advanceMinDays: 0,
   notes: [],
   hourlyFee: null,
 };
@@ -91,6 +97,8 @@ export const PJ_POLICY: SitePolicy = {
   dailyMaxSlots: 2, // 1일 1면 2시간 = 1h 슬롯 2개
   perCourtMaxSlots: 2,
   bookableDays: 7,
+  maxConsecutiveSlots: 2,
+  advanceMinDays: 0,
   notes: [
     '1인 1일 1면(2시간)까지 · 1일 1회만 예약',
     '당일 기준 7일까지 예약 가능',

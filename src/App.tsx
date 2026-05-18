@@ -5,6 +5,7 @@ import Account from './routes/Account';
 import Race from './routes/Race';
 import Quick from './routes/Quick';
 import PaymentResult from './routes/PaymentResult';
+import Feedback from './routes/Feedback';
 import { SiteSelector } from './components/SiteSelector';
 import { DebugPanel } from './components/DebugPanel';
 import { useSiteStore } from './stores/siteStore';
@@ -35,7 +36,10 @@ export default function App() {
           🎾 Booking Tennis
         </Link>
         <div className="flex items-center gap-3">
-          <SiteSelector disabled={!isHome} />
+          <SiteSelector />
+          <Link to="/feedback" className="text-sm text-slate-400 hover:text-slate-200 shrink-0">
+            피드백
+          </Link>
           {!isHome && (
             <Link to="/" className="text-sm text-slate-400 hover:text-slate-200 shrink-0">
               홈
@@ -50,6 +54,7 @@ export default function App() {
           <Route path="/race" element={<Race />} />
           <Route path="/quick" element={<Quick />} />
           <Route path="/payment-result" element={<PaymentResult />} />
+          <Route path="/feedback" element={<Feedback />} />
         </Routes>
       </main>
       <footer className="px-4 py-3 text-center text-xs text-slate-500 border-t border-slate-800">

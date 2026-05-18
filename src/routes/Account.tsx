@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { useSiteStore } from '@/stores/siteStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -151,6 +152,12 @@ export default function Account() {
           <li>"계정 삭제" 누르면 즉시 폐기됩니다.</li>
         </ul>
       </Card>
+
+      <div className="text-center">
+        <Link to="/feedback" className="text-sm text-slate-400 hover:text-slate-200 underline underline-offset-2">
+          불편한 점이나 개선 의견을 알려주세요
+        </Link>
+      </div>
     </div>
   );
 }
